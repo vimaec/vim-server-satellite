@@ -7,15 +7,16 @@ export const SESSION_KEY = 'vimSatellite.auth'
 export const HINT_KEY = 'vimSatellite.hint'
 export const PKCE_KEY = 'vimSatellite.pkce'
 
+/** Mirrors the Session type in src/auth/entra.ts. */
 export type FakeSession = {
   access: string
   refresh: string
   exp: number
   name: string
   upn: string
-  kind: 'entra' | 'pat'
 }
 
+/** A fake Entra session, as the real flow would have written it. */
 export function fakeSession(overrides: Partial<FakeSession> = {}): FakeSession {
   return {
     access: GOOD_TOKEN,
@@ -23,12 +24,11 @@ export function fakeSession(overrides: Partial<FakeSession> = {}): FakeSession {
     exp: Date.now() + 60 * 60 * 1000,
     name: 'Ada Lovelace',
     upn: 'ada@example.com',
-    kind: 'entra',
     ...overrides,
   }
 }
 
-/** Writes the session before any app code runs, so the app boots signed in. */
+/** Writes the fake Entra session before any app code runs, so the app boots signed in. */
 export async function useFakeSession(
   page: Page,
   overrides: Partial<FakeSession> = {},

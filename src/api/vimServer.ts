@@ -1,5 +1,5 @@
 /** Typed wrappers over the VIM Server endpoints this app calls. */
-import { apiFetch, apiRequest } from './http'
+import { apiFetch } from './http'
 import type {
   DownloadUrl,
   OrgSummary,
@@ -16,20 +16,9 @@ export function getConfig(): Promise<ServerConfig> {
   return apiFetch<ServerConfig>('/config', { anonymous: true })
 }
 
-/** Also used to validate a personal access token before storing it. */
+/** The signed-in user: name, email and the organisations they belong to. */
 export function getProfile(): Promise<Profile> {
   return apiFetch<Profile>('/profile')
-}
-
-/**
- * Same call, but a rejected token gives null instead of throwing and instead of
- * tripping the "session expired" handler. Used to check a pasted access token
- * before it is stored as a session.
- */
-export async function getProfileIfAuthorized(): Promise<Profile | null> {
-  const response = await apiRequest('/profile', { allowStatus: [401, 403] })
-  if (!response.ok) return null
-  return (await response.json()) as Profile
 }
 
 export function listOrgs(): Promise<OrgSummary[]> {

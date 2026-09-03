@@ -17,14 +17,13 @@ import {
 } from 'react'
 import { fallbackEntraConfig, makeEntraConfig, type EntraConfig } from '../config'
 import { setAuthBridge } from '../api/http'
-import { getConfig, getProfileIfAuthorized } from '../api/vimServer'
+import { getConfig } from '../api/vimServer'
 import {
   beginSignIn,
   clearSession,
   completeSignInFromHash,
   readSession,
   refreshIfNeeded,
-  writeSession,
   type Session,
 } from './entra'
 
@@ -36,16 +35,12 @@ export type Auth = {
   /** Message shown on the sign-in page: a failed sign-in or an expired session. */
   error: string
   signIn: () => void
-  signInWithToken: (pat: string) => Promise<void>
   signOut: () => void
   /** A usable access token, refreshed if needed. Empty string when signed out. */
   getToken: () => Promise<string>
 }
 
 const AuthContext = createContext<Auth | null>(null)
-
-/** A personal access token has no expiry we can read, so assume a year. */
-const PAT_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000
 
 export function AuthProvider({ children }: { children: ReactNode }): JSX.Element {
   const [status, setStatus] = useState<AuthStatus>('loading')
@@ -55,8 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   // Refs so getToken stays a stable callback that still sees the latest values.
   const sessionRef = useRef<Session | null>(null)
   const configRef = useRef<EntraConfig>(fallbackEntraConfig)
-  // A token being validated is not a session yet, but apiRequest must send it.
-  const pendingToken = useRef('')
 
   const apply = useCallback((next: Session | null) => {
     sessionRef.current = next
@@ -74,7 +67,6 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   )
 
   const getToken = useCallback(async (): Promise<string> => {
-    if (pendingToken.current) return pendingToken.current
     const current = sessionRef.current
     if (!current) return ''
     const next = await refreshIfNeeded(configRef.current, current)
@@ -128,41 +120,6 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     void beginSignIn(configRef.current)
   }, [])
 
-  const signInWithToken = useCallback(
-    async (pat: string) => {
-      const token = pat.trim()
-      if (!token) {
-        setError('Paste a personal access token first.')
-        return
-      }
-      setError('')
-      pendingToken.current = token
-      try {
-        const profile = await getProfileIfAuthorized()
-        if (!profile) {
-          setError('VIM Server rejected that token. Check it and try again.')
-          return
-        }
-        const name = [profile.firstName, profile.lastName].filter(Boolean).join(' ')
-        const next: Session = {
-          access: token,
-          refresh: '',
-          exp: Date.now() + PAT_LIFETIME_MS,
-          name: name || profile.email || 'Access token',
-          upn: profile.email ?? '',
-          kind: 'pat',
-        }
-        writeSession(next)
-        apply(next)
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Could not reach VIM Server.')
-      } finally {
-        pendingToken.current = ''
-      }
-    },
-    [apply],
-  )
-
   const signOut = useCallback(() => {
     // No Entra end-session call: this only forgets the tokens in this browser.
     clearSession()
@@ -171,8 +128,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
   }, [apply])
 
   const value = useMemo<Auth>(
-    () => ({ status, session, error, signIn, signInWithToken, signOut, getToken }),
-    [status, session, error, signIn, signInWithToken, signOut, getToken],
+    () => ({ status, session, error, signIn, signOut, getToken }),
+    [status, session, error, signIn, signOut, getToken],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

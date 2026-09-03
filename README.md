@@ -72,7 +72,7 @@ on that path: `completeSignInFromHash()` looks for the fragment on *any* path, t
 **Exchange and store.** The code, the verifier and the redirect URI are posted to
 `{authority}/token` as `application/x-www-form-urlencoded`, and the `state` must match what this tab
 stored or the reply is refused. The session then goes into `localStorage` under `vimSatellite.auth`
-as `{ access, refresh, exp, name, upn, kind }`. `name` and `upn` are read out of the `id_token`
+as `{ access, refresh, exp, name, upn }`. `name` and `upn` are read out of the `id_token`
 claims for display only — the app never verifies that signature, the server does.
 `vimSatellite.hint` keeps the last `upn` for `login_hint`. The PKCE pair lives in `sessionStorage`
 under `vimSatellite.pkce`, so only the tab that started a sign-in can complete it.

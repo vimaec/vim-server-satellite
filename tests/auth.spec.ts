@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { installMockVimServer, GOOD_TOKEN } from './support/mockVimServer'
+import { installMockVimServer } from './support/mockVimServer'
 import { mockEntraToken, seedPkce, SESSION_KEY, useFakeSession } from './support/auth'
 
 test.describe('sign-in', () => {
@@ -12,31 +12,6 @@ test.describe('sign-in', () => {
     await expect(page.getByTestId('project-picker')).toHaveCount(0)
     await expect(page.getByTestId('project-page')).toHaveCount(0)
     expect(await page.evaluate(() => window.__vimSatellite?.getState())).toBe('sign-in')
-  })
-
-  test('a valid access token signs in and lands on the project picker', async ({ page }) => {
-    await installMockVimServer(page)
-    await page.goto('/')
-
-    await page.getByTestId('signin-pat-toggle').click()
-    await page.getByTestId('signin-pat-input').fill(GOOD_TOKEN)
-    await page.getByTestId('signin-pat-submit').click()
-
-    await expect(page.getByTestId('project-picker')).toBeVisible()
-    // The mock validated the token through GET /profile before it was stored.
-    await expect(page.getByTestId('user-name')).toHaveText('Ada Lovelace')
-  })
-
-  test('a rejected access token shows an error and stays signed out', async ({ page }) => {
-    await installMockVimServer(page)
-    await page.goto('/')
-
-    await page.getByTestId('signin-pat-toggle').click()
-    await page.getByTestId('signin-pat-input').fill('not-the-token')
-    await page.getByTestId('signin-pat-submit').click()
-
-    await expect(page.getByTestId('signin-error')).toContainText('rejected that token')
-    await expect(page.getByTestId('project-picker')).toHaveCount(0)
   })
 
   test('a PKCE reply is exchanged for tokens and signs the user in', async ({ page }) => {

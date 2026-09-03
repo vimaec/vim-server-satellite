@@ -14,13 +14,12 @@ import { jwtClaims, randomUrlSafe, sha256url } from './pkce'
 /** The signed-in user, as stored in localStorage. */
 export type Session = {
   access: string
-  /** Empty for a PAT session: personal access tokens do not refresh. */
+  /** Empty when Entra issued no refresh token; the session then ends at `exp`. */
   refresh: string
   /** Absolute expiry, ms since epoch. */
   exp: number
   name: string
   upn: string
-  kind: 'entra' | 'pat'
 }
 
 type PkcePair = { verifier: string; state: string }
@@ -109,7 +108,6 @@ function toSession(body: TokenResponse, previous: Session | null): Session {
     exp: Date.now() + (Number(body.expires_in) || 3600) * 1000,
     name: claim('name') || previous?.name || upn,
     upn,
-    kind: 'entra',
   }
 }
 
@@ -214,8 +212,7 @@ let refreshing: Promise<Session | null> | null = null
  */
 export async function refreshIfNeeded(cfg: EntraConfig, session: Session): Promise<Session | null> {
   if (session.exp - Date.now() > 60_000) return session
-  // A PAT is long-lived and has no refresh grant; use it until the server says no.
-  if (session.kind === 'pat') return session
+  // Nothing left to refresh with: the user has to sign in again.
   if (!session.refresh) return null
   if (refreshing) return refreshing
 

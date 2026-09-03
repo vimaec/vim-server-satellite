@@ -81,9 +81,8 @@ export async function apiRequest(path: string, init: ApiInit = {}): Promise<Resp
     throw new ApiError(0, 'VIM Server is unreachable', 'Check the network and try again.')
   }
 
-  // A caller that lists 401 in allowStatus is checking a token on purpose
-  // (PAT sign-in), so it must not tear down the session it is about to create.
-  if (response.status === 401 && !anonymous && !allowStatus?.includes(401)) {
+  // An authenticated call that comes back 401 means the session is over.
+  if (response.status === 401 && !anonymous) {
     bridge?.onUnauthorized('Your session has expired. Sign in again to continue.')
   }
   if (!response.ok && !allowStatus?.includes(response.status)) {

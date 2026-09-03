@@ -15,7 +15,7 @@ import type { Page, Route } from '@playwright/test'
 export const SERVER = process.env.VITE_VIM_SERVER_URL ?? 'https://server-dev.vimaec.com'
 export const API = `${SERVER}/api/v1`
 
-/** The only token the mock accepts. useFakeSession() and the PAT tests use it. */
+/** The only token the mock accepts; useFakeSession() and mockEntraToken() hand it out. */
 export const GOOD_TOKEN = 'e2e-token'
 
 /** Fake blob storage: where the snapshot SAS URL points. */

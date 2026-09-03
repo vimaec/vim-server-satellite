@@ -1,3 +1,4 @@
 * text=auto eol=lf
 *.vim binary
 *.png binary
+*.ico binary
