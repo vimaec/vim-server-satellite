@@ -235,10 +235,13 @@ input {
   min-height: 0;
 }
 
+/* The side pane is a column: the tree takes the space that is left, the label
+   panel keeps its place at the bottom. Each scrolls on its own. */
 .side-pane {
+  display: flex;
   flex: 0 0 340px;
-  overflow: auto;
-  padding: 12px;
+  flex-direction: column;
+  min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--surface);
 }
@@ -251,16 +254,227 @@ input {
   background: #e9ecef;
 }
 
+/* Floats over the canvas, out of the way of vim-web's own control bar. */
 .viewer-status {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 20;
+  max-width: calc(100% - 16px);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 88%);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.viewer-status[data-state='error'] {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+/* Once the model is on screen the pill has nothing left to say, and it would
+   sit on top of the viewer's own logo. */
+.viewer-status[data-state='loaded'] {
+  display: none;
+}
+
+/* --- element tree ------------------------------------------------------- */
+
+.tree {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px;
+  min-height: 0;
+}
+
+.tree-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tree-toolbar input {
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-rows {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 10px 10px;
   font-size: 12px;
 }
 
-.viewer-status .url {
-  overflow-wrap: anywhere;
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+.tree-indent {
+  margin-left: 12px;
+}
+
+.tree-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  text-align: left;
+}
+
+.tree-group:hover {
+  background: var(--bg);
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex: 0 0 12px;
   color: var(--muted);
+}
+
+[data-testid='tree-element'] {
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+[data-testid='tree-element']:hover {
+  background: var(--bg);
+}
+
+[data-testid='tree-element'][aria-selected='true'] {
+  color: #fff;
+  background: var(--accent);
+}
+
+.tree-leaf {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px 2px 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-element-label {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgb(0 0 0 / 25%);
+  border-radius: 50%;
+}
+
+/* --- label panel -------------------------------------------------------- */
+
+.label-panel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 48%;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.label-list,
+.labelled-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.label-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.label-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label-item button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+button.icon {
+  padding: 2px 7px;
+  line-height: 1;
+}
+
+.swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgb(0 0 0 / 25%);
+  border-radius: 3px;
+}
+
+.small-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.label-new {
+  display: flex;
+  gap: 6px;
+}
+
+.label-new input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.label-new input[type='color'] {
+  width: 32px;
+  padding: 1px;
+}
+
+.label-status {
+  margin: 0;
+  color: var(--muted);
+}
+
+.label-status[data-state='error'] {
+  color: var(--error);
+}
+
+.label-panel p {
+  margin: 0;
+}
+
+/* The labelled list is the only part that grows, so it gets the scroll. */
+.labelled-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  font-size: 12px;
+}
+
+.labelled-element {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

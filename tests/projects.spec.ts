@@ -66,18 +66,20 @@ test.describe('projects', () => {
     expect(new URL(page.url()).searchParams.get('project')).toBeNull()
   })
 
-  test('both panes are present and the snapshot URL resolves', async ({ page }) => {
+  test('both panes are present and the viewer starts loading', async ({ page }) => {
     await page.goto('/')
     await page.locator('[data-testid="project-item"][data-project-id="p-tiny"]').click()
 
-    await expect(page.getByTestId('side-pane')).toContainText('Element tree and labels come here')
+    await expect(page.getByTestId('element-tree')).toBeVisible()
+    await expect(page.getByTestId('label-panel')).toBeVisible()
+    await expect(page.getByTestId('viewer-pane')).toBeVisible()
 
-    // Phase 1: "ready" means the download URL came back from
-    // /vim/download?redirect=false. Phase 2 replaces it with the viewer's
-    // own loading/loaded states.
-    const status = page.getByTestId('viewer-status')
-    await expect(status).toHaveAttribute('data-state', 'ready')
-    await expect(status).toContainText('https://mock-blob.local/tiny-house.vim')
+    // The state is the viewer's own now. Waiting for the whole snapshot to
+    // arrive is viewer-labels.spec.ts's job; here it only has to start.
+    await expect(page.getByTestId('viewer-status')).toHaveAttribute(
+      'data-state',
+      /loading|loaded/,
+    )
   })
 
   test('a project whose snapshot download fails reports an error', async ({ page }) => {
