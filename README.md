@@ -17,7 +17,7 @@ Live build: <https://vimaec.github.io/vim-server-satellite/>
 | Entra ID authorization code + PKCE, written out with `fetch` (no MSAL, no CDN) | `src/auth/pkce.ts`, `src/auth/entra.ts` |
 | Session storage, silent refresh, and a clean drop back to sign-in on a 401 | `src/auth/AuthProvider.tsx`, `src/api/http.ts` |
 | Asking the server which Entra app registration to trust (`GET /api/v1/config`) | `src/config.ts` |
-| Bearer header, `ProblemDetails` to `ApiError`, allow-listed statuses (404, 412) | `src/api/http.ts` |
+| Bearer header, `ProblemDetails` to `ApiError`, one allow-listed status (404) | `src/api/http.ts` |
 | Typed wrappers for the REST endpoints, and the custom data store as app storage | `src/api/vimServer.ts`, `src/api/projectData.ts`, `src/api/types.ts` |
 | Listing every reachable project (there is no "all projects" endpoint) | `src/pages/ProjectPickerPage.tsx` |
 | Resolving a snapshot to a time-limited blob URL and loading it in the viewer | `src/pages/ProjectPage.tsx`, `src/viewer/` |
@@ -97,7 +97,6 @@ bearer token is always required.
 | Method | Path | Purpose | Wrapper |
 |---|---|---|---|
 | GET | `/config` | Anonymous. `{ tenantId, clientId }`: the app registration the server trusts | `getConfig()` |
-| GET | `/profile` | The signed-in user: name, email, organisations | `getProfile()` |
 | GET | `/org` | Organisations the user belongs to, with their org role | `listOrgs()` |
 | GET | `/org/{orgId}/project` | Projects in one org; each carries `latestVim` or `null` | `listProjects()` |
 | GET | `/project/{id}` | Project detail: name, organisation, `latestVim` | `getProject()` |
@@ -106,7 +105,7 @@ bearer token is always required.
 | GET | `/project/{id}/vim/download?redirect=false` | `{ url, expiresAtUtc }`: a ~6 h Azure Blob SAS URL | `getVimDownloadUrl()` |
 | GET | `/project/{id}/data/{ns}` | Every entry in a namespace | `listEntries()` |
 | GET | `/project/{id}/data/{ns}/{key}` | One entry, plus the `ETag` response header; `404` when absent | `getEntry()` |
-| PUT | `/project/{id}/data/{ns}/{key}` | Write one entry; optional `If-Match`, which gives `412` on a stale write | `putEntry()` |
+| PUT | `/project/{id}/data/{ns}/{key}` | Write one entry; optional `If-Match` or `If-None-Match: *`, either of which gives `412` when it does not hold | `putEntry()` |
 | PUT | `/project/{id}/data/{ns}` | Batch upsert of `[{ key, value }]`, returns `{ created, updated }` | `putEntries()` |
 | POST | `/project/{id}/data/{ns}/delete` | Batch delete of `["key", ...]`, returns `{ deleted }` | `deleteEntries()` |
 
@@ -115,8 +114,9 @@ Things worth knowing before you write your own client:
 - There is no "all my projects" endpoint. `listAccessibleProjects()` reads `/org` and then fans out
   over `/org/{id}/project` in parallel; an org whose project list fails is shown empty rather than
   failing the whole page.
-- A project you cannot see answers `404`, never `403`. A `403` means the licence gate, and its body
-  is `{ error, message }` rather than RFC 7807 `ProblemDetails`; `http.ts` handles both shapes.
+- A project you cannot see answers `404`, never `403`. A `403` is either the licence gate — whose
+  body is `{ error, message }` rather than RFC 7807 `ProblemDetails`, and `http.ts` handles both
+  shapes — or a write attempted with only the `Viewer` role, such as a label write to the data store.
 - Data store reads need the `Viewer` project role and writes need `Manager`. Keys may not contain a
   slash.
 
@@ -158,12 +158,15 @@ An element index is only meaningful for the model instance currently loaded — 
 and the indices move. So labels are keyed by **UniqueId**:
 
 ```ts
-elementKey(e) = e.uniqueId ?? `id-${e.elementId}`
+elementKey(e) = e.uniqueId || (e.elementId !== '-1' ? `id-${e.elementId}` : `index-${e.index}`)
 ```
 
-The fallback covers source formats that have no UniqueId, and a key like `id-42` reads as the weaker
-thing it is. On load the app fetches the assignments, maps each key back to the element index of the
-loaded model, and applies the colours.
+`||`, not `??`: vim-web reports a missing UniqueId as an empty string. The `id-` fallback covers
+source formats that have no UniqueId, and reads as the weaker thing it is. ElementId `-1` means "no
+Revit id at all", so it cannot key anything — every such element would share one key, `id--1` — and
+those fall back to the row index, which is **snapshot-local**: a label keyed that way does not
+survive a re-export. On load the app fetches the assignments, maps each key back to the element index
+of the loaded model, and applies the colours.
 
 ### Labels data layout
 
@@ -171,8 +174,8 @@ Two namespaces in the project's custom data store. Nothing is stored anywhere el
 
 | Namespace | Key | Value | Written by |
 |---|---|---|---|
-| `satellite.palette` | `palette` | `{ labels: [{ id, name, color: "#rrggbb" }] }` | palette edits: one `PUT` with `If-Match` |
-| `satellite.labels` | element key: UniqueId, else `id-<elementId>` | `{ labelId, elementId, elementName?, by?, at }` | applying a label (batch `PUT`), removing one (batch delete) |
+| `satellite.palette` | `palette` | `{ labels: [{ id, name, color: "#rrggbb" }] }` | palette edits: read–modify–write, `If-Match` (or `If-None-Match: *` to create) |
+| `satellite.labels` | element key: UniqueId, else `id-<elementId>`, else `index-<row>` | `{ labelId, elementId, elementName?, by?, at }` | applying a label (batch `PUT`), removing one (batch delete) |
 
 The default palette — Review `#e5484d`, Approved `#30a46c`, Question `#f5a524` — is created
 client-side when a project has none, and is written to the server only on the first label write, so
@@ -182,11 +185,25 @@ An assignment stores the label **id**, not its colour. Renaming a label or chang
 then one palette write, and every element carrying that label follows. `by` and `at` record who
 labelled what, and when.
 
-**Concurrency.** The palette is read with its `ETag` — a quoted integer write-version, for example
-`"3"` — and written back with `If-Match`, so if two people edit the palette at the same time one of
-them gets a `412` instead of a silent overwrite. Per-element assignments are last-write-wins on
-purpose: they are independent keys, and one user labelling a wall does not conflict with another
-labelling a door.
+**Concurrency.** The palette is one JSON document that everyone on the project shares, so every
+palette change is a read–modify–write rather than a `PUT` of the copy this browser happens to hold
+(`updatePalette()` in `src/labels/labelsApi.ts`). One attempt is: read the entry with its `ETag` — a
+quoted integer write-version, for example `"3"` — apply the change to what is *stored*, and write it
+back with `If-Match`. When the project has no palette yet, that first write instead carries
+`If-None-Match: *`, which makes it create-only. Either precondition answers `412` when it no longer
+holds, which means somebody else wrote first: the cycle simply runs again over their version, up to
+three times. So two people adding a label at the same time end up with both labels, and the app
+adopts the merged result the server returns rather than its own copy.
+
+Nothing may be written before that first read has finished. Until then the app does not know whether
+the project already has a palette, and a create-only guess would either fail or, without the
+precondition, overwrite someone else's labels; so the whole panel stays disabled while it loads and
+offers **Retry** if the read failed.
+
+Per-element assignments are last-write-wins on purpose: they are independent keys, and one user
+labelling a wall does not conflict with another labelling a door. Deleting a label removes its
+assignments **first** and updates the palette after, because a label with no assignments is
+harmless, while an assignment pointing at a label that no longer exists colours nothing.
 
 **Roles.** The label panel needs `Manager` or `Admin` on the project; with `Viewer` it is read-only
 and says so, because a write would come back `403`. The role comes from `GET /project/{id}/role`,
@@ -257,6 +274,16 @@ npm test
 npm run test:ui                   # interactive runner
 ```
 
+The main suite runs against `npm run dev`, which always serves the app from `/`. Serving it from a
+sub-path is what GitHub Pages does, and it can break on its own — asset URLs, `public/` files, the
+Entra redirect page — so that case has its own tiny suite over a real `BASE_PATH` build served by
+`vite preview`:
+
+```bash
+BASE_PATH=/vim-server-satellite/ npm run build
+BASE_PATH=/vim-server-satellite/ npm run test:subpath   # tests/subpath, port 4173
+```
+
 `playwright.config.ts` starts `npm run dev` itself, and reuses one already running locally. It pins
 Chromium to SwiftShader so headless WebGL works (`--use-gl=angle --use-angle=swiftshader
 --enable-unsafe-swiftshader --ignore-gpu-blocklist`) and runs one worker, because several software
@@ -300,8 +327,8 @@ window.__vimSatellite = {
 
 Push to `develop`. `.github/workflows/pages.yml` runs one job: checkout, Node 22 with an npm cache,
 `npm ci`, `npx playwright install --with-deps chromium`, `npm run build` with
-`BASE_PATH=/vim-server-satellite/`, `npm test`, then `configure-pages`, `upload-pages-artifact` over
-`dist`, and `deploy-pages`. A failing run uploads the Playwright HTML report, and
+`BASE_PATH=/vim-server-satellite/`, `npm test`, `npm run test:subpath` against that build, then
+`configure-pages`, `upload-pages-artifact` over `dist`, and `deploy-pages`. A failing run uploads the Playwright HTML report, and
 `workflow_dispatch` runs the whole thing by hand.
 
 The repository's **Pages source must be set to "GitHub Actions"**, not "Deploy from a branch": the
@@ -326,6 +353,7 @@ src/
   App.tsx               the whole app as one state machine: loading -> sign-in -> picker -> project
   config.ts             env vars with defaults, derived Entra settings, storage keys, namespaces
   debug.ts              window.__vimSatellite, the read-only hook the tests use
+  format.ts             the two date formatters the pages share
   styles.css            plain CSS, one light theme, no framework
   auth/                 pkce.ts (base64url, S256 challenge), entra.ts (the React-free flow:
                         begin, complete, refresh, session storage), AuthProvider.tsx (useAuth)
@@ -343,6 +371,7 @@ public/
 tests/
   support/              the in-browser VIM Server (mockVimServer.ts) and the fake session (auth.ts)
   fixtures/             Tiny_House_Imperial.r2026.vim, 252 KB: the model the suite loads
+  subpath/              the BASE_PATH build smoke test (playwright.subpath.config.ts)
   *.spec.ts             sign-in, projects, the viewer and labels, and the mock itself
 .github/workflows/
   pages.yml             build with BASE_PATH, test, deploy to GitHub Pages
@@ -359,16 +388,18 @@ origin's `signin-oidc` URI.
 `src/api/vimServer.ts` using `apiFetch<T>(path)`. The bearer token, `Accept`, the CORS mode, error
 translation and the 401 handling all come from `http.ts` for free. For a write, spread
 `jsonBody(value)` into the init and set `method`. To handle a status yourself instead of throwing —
-`404` for "absent", `412` for "someone wrote first" — use `apiRequest(path, { allowStatus: [404] })`
-and read the `Response`.
+`404` for "absent" — use `apiRequest(path, { allowStatus: [404] })` and read the `Response`. A `412`
+is deliberately *not* allow-listed: it is thrown like any other failure, and the palette write catches
+it to retry.
 
 **Store your own data.** Add a namespace to `namespaces` in `src/config.ts` and use
 `src/api/projectData.ts` as it is. The store is namespace plus key to arbitrary JSON (Postgres
 `jsonb`), scoped to one project and gated by project membership, which makes it the right place for
 anything a satellite app keeps per project: view states, annotations, review status, issue links, a
 cached derived index. Keys must not contain `/`. Read with `getEntry()` and write with
-`putEntry(..., ifMatch)` when two users could collide; use `putEntries()` and `deleteEntries()` when
-one user action touches many keys — one request beats fifty.
+`putEntry(..., { ifMatch })` when two users could collide, or `{ ifNoneMatch: '*' }` for a write that
+must not overwrite an existing entry; use `putEntries()` and `deleteEntries()` when one user action
+touches many keys — one request beats fifty.
 
 **Replace the label feature.** `src/labels/` is deliberately a leaf. It is handed the
 `ModelElement[]` built by `src/tree/`, plus the current selection, and it gives back a map of
@@ -390,7 +421,9 @@ This is a sample, and it stops where a product would keep going.
   not across a set of linked documents, so in a federated model two elements can share a label key.
   A real app would prefix the key with the source document id.
 - **Elements with no UniqueId fall back to `id-<elementId>`**, which is not stable across a
-  re-export. Those labels can drift onto the wrong element when a new snapshot lands.
+  re-export, and an element with no Revit id either falls back to `index-<row>`, which is only
+  meaningful for the loaded snapshot. Those labels can drift onto the wrong element, or be lost,
+  when a new snapshot lands.
 - **No Entra end-session on sign out.** The app forgets its own tokens, but the Microsoft session in
   the browser stays, so the next sign-in is usually silent, and signing in as a different user needs
   a Microsoft sign-out.

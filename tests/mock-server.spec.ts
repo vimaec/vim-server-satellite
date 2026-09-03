@@ -1,9 +1,10 @@
 /**
  * Tests for the test harness itself.
  *
- * Nothing in Phase 1 loads a model or writes a label, so these keep the two
- * tricky parts of the mock honest until Phase 2 uses them: HTTP Range replies
- * for the .vim download, and ETag concurrency on the project data store.
+ * The two tricky parts of the mock are checked on their own terms, so a broken
+ * harness fails as a harness rather than as a mysterious viewer timeout: HTTP
+ * Range replies for the .vim download, and the preconditions on the project
+ * data store.
  */
 import { expect, test } from '@playwright/test'
 import { API, BLOB_URL, GOOD_TOKEN, installMockVimServer } from './support/mockVimServer'
@@ -68,7 +69,9 @@ test.describe('mock VIM Server', () => {
     expect(probe.past.status).toBe(416)
   })
 
-  test('the data store enforces If-Match and records writes', async ({ page }) => {
+  test('the data store enforces If-Match and If-None-Match and records writes', async ({
+    page,
+  }) => {
     const mock = await installMockVimServer(page, {
       data: { 'satellite.palette': { palette: { labels: [] } } },
     })
@@ -94,6 +97,18 @@ test.describe('mock VIM Server', () => {
         })
         const missing = await fetch(`${base}/nope`, { headers })
 
+        // If-None-Match: * is create-only, so it loses against an entry that exists.
+        const createOnly = await fetch(`${base}/palette`, {
+          method: 'PUT',
+          headers: { ...headers, 'If-None-Match': '*' },
+          body: JSON.stringify({ labels: [] }),
+        })
+        const created = await fetch(`${base}/fresh-key`, {
+          method: 'PUT',
+          headers: { ...headers, 'If-None-Match': '*' },
+          body: JSON.stringify({ labels: [] }),
+        })
+
         const batch = await fetch(`${api}/project/p-tiny/data/satellite.labels`, {
           method: 'PUT',
           headers,
@@ -114,9 +129,11 @@ test.describe('mock VIM Server', () => {
           stale: stale.status,
           fresh: fresh.status,
           missing: missing.status,
+          createOnly: createOnly.status,
+          created: created.status,
           batch: (await batch.json()) as unknown,
           removed: (await removed.json()) as unknown,
-          list: (await list.json()) as { key: string; etag?: string }[],
+          list: (await list.json()) as { key: string }[],
         }
       },
       [API, GOOD_TOKEN] as const,
@@ -126,6 +143,8 @@ test.describe('mock VIM Server', () => {
     expect(result.stale).toBe(412)
     expect(result.fresh).toBe(200)
     expect(result.missing).toBe(404)
+    expect(result.createOnly).toBe(412)
+    expect(result.created).toBe(201)
     expect(result.batch).toEqual({ created: 2, updated: 0 })
     expect(result.removed).toEqual({ deleted: 1 })
     expect(result.list.map((entry) => entry.key)).toEqual(['uid-2'])

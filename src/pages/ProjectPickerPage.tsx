@@ -2,17 +2,13 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../auth/AuthProvider'
 import { listAccessibleProjects, type OrgProjects } from '../api/vimServer'
 import type { BlobSummary } from '../api/types'
+import { formatDate } from '../format'
 
 /** "3.2 MB", for the snapshot line under a project name. */
 function formatSize(bytes: number): string {
   if (!bytes) return '0 MB'
   const mb = bytes / (1024 * 1024)
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleDateString()
 }
 
 function snapshotLine(vim: BlobSummary): string {

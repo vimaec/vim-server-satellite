@@ -12,6 +12,9 @@ import { useFakeSession } from './support/auth'
 /** Parsing and building the whole snapshot under software GL is not quick. */
 const LOAD_TIMEOUT = 60_000
 
+/** Long enough to see the panel refuse writes while the palette is in flight. */
+const PALETTE_DELAY_MS = 3_000
+
 /** Waits for the viewer to finish loading and the tree to be populated. */
 async function waitForModel(page: Page): Promise<void> {
   await expect(page.getByTestId('viewer-status')).toHaveAttribute('data-state', 'loaded', {
@@ -151,6 +154,9 @@ test.describe('viewer, tree and labels', () => {
       (write) => write.kind === 'put' && write.namespace === 'satellite.palette',
     )
     expect(paletteWrites).toHaveLength(1)
+    // Create-only: the very first palette write cannot overwrite a palette
+    // somebody else created in the meantime.
+    expect((paletteWrites[0] as { ifNoneMatch: string | null }).ifNoneMatch).toBe('*')
     expect(mock.entry('satellite.palette', 'palette')).toMatchObject({
       labels: expect.arrayContaining([{ id: 'review', name: 'Review', color: '#e5484d' }]),
     })
@@ -252,6 +258,73 @@ test.describe('viewer, tree and labels', () => {
         expect.objectContaining({ name: 'Blocked', color: '#7c3aed' }),
       ]),
     })
+  })
+
+  test('a stale palette write is merged after a 412', async ({ page }) => {
+    const review = { id: 'review', name: 'Review', color: '#e5484d' }
+    const other = { id: 'other', name: 'Other', color: '#1f6feb' }
+    let interfered = false
+    const mock = await installMockVimServer(page, {
+      data: { 'satellite.palette': { palette: { labels: [review] } } },
+      beforeEntryWrite: ({ namespace, key }, store) => {
+        if (interfered || namespace !== 'satellite.palette' || key !== 'palette') return
+        interfered = true
+        // Another user adds 'Other' between this page's read and its write, so
+        // the write-version it holds is stale and its PUT gets a 412.
+        store.get(namespace)?.set(key, { value: { labels: [review, other] }, version: 2 })
+      },
+    })
+    await useFakeSession(page)
+    await page.goto('/?project=p-tiny')
+    await expect(page.getByTestId('label-item')).toHaveCount(1)
+
+    await page.getByTestId('label-new-name').fill('Blocked')
+    await page.getByTestId('label-new-color').fill('#7c3aed')
+    await page.getByTestId('label-new-add').click()
+
+    await expect(page.getByTestId('label-status')).toHaveAttribute('data-state', 'saved')
+
+    // The 412 sent the write back to the start, so the other user's label is
+    // still there and the new one is appended to it rather than over it.
+    const paletteWrites = mock.writes.filter(
+      (write) => write.kind === 'put' && write.namespace === 'satellite.palette',
+    )
+    expect(paletteWrites).toHaveLength(2)
+    expect(mock.entry('satellite.palette', 'palette')).toMatchObject({
+      labels: [review, other, expect.objectContaining({ name: 'Blocked', color: '#7c3aed' })],
+    })
+    await expect(page.getByTestId('label-item')).toHaveCount(3)
+    await expect(labelItem(page, 'Other')).toBeVisible()
+    await expect(labelItem(page, 'Blocked')).toBeVisible()
+  })
+
+  test('labels cannot be written before the palette has loaded', async ({ page }) => {
+    await installMockVimServer(page)
+    // Hold the palette read open. Until it answers, the app does not know
+    // whether the project already has a palette, so it must write nothing.
+    await page.route(
+      '**/api/v1/project/p-tiny/data/satellite.palette/palette',
+      async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, PALETTE_DELAY_MS))
+        await route.fallback()
+      },
+    )
+    await useFakeSession(page)
+    await page.goto('/?project=p-tiny')
+
+    const apply = page.getByTestId('label-apply').first()
+    await expect(page.getByTestId('label-status')).toHaveAttribute('data-state', 'loading')
+    await expect(apply).toBeDisabled()
+    await expect(page.getByTestId('label-new-add')).toBeDisabled()
+    await expect(page.getByTestId('label-remove')).toBeDisabled()
+
+    await expect(page.getByTestId('label-status')).toHaveAttribute('data-state', 'idle')
+    await expect(page.getByTestId('label-new-add')).toBeEnabled()
+
+    // Apply needs a selection as well as a loaded palette.
+    await waitForModel(page)
+    await (await searchLeaves(page, 'Walls')).nth(0).click()
+    await expect(apply).toBeEnabled()
   })
 
   test('deleting a label also deletes its assignments', async ({ page }) => {

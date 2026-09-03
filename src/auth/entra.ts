@@ -24,6 +24,12 @@ export type Session = {
 
 type PkcePair = { verifier: string; state: string }
 
+/** Refresh this long before the access token expires, so a call in flight is safe. */
+const REFRESH_MARGIN_MS = 60_000
+
+/** Entra always sends `expires_in`; this is only the floor if it ever does not. */
+const DEFAULT_TOKEN_LIFETIME_S = 3600
+
 /** Result of handling a `#code=` / `#error=` fragment. */
 export type CompleteResult =
   | { kind: 'none' }
@@ -105,7 +111,7 @@ function toSession(body: TokenResponse, previous: Session | null): Session {
     access: body.access_token ?? '',
     // A refresh response may omit the rotated token; keep what we already had.
     refresh: body.refresh_token ?? previous?.refresh ?? '',
-    exp: Date.now() + (Number(body.expires_in) || 3600) * 1000,
+    exp: Date.now() + (Number(body.expires_in) || DEFAULT_TOKEN_LIFETIME_S) * 1000,
     name: claim('name') || previous?.name || upn,
     upn,
   }
@@ -134,11 +140,6 @@ export async function beginSignIn(cfg: EntraConfig): Promise<void> {
   if (hint) query.set('login_hint', hint)
 
   location.assign(`${cfg.authority}/authorize?${query.toString()}`)
-}
-
-/** True when the current URL fragment carries an Entra reply. */
-export function hasAuthReply(): boolean {
-  return /(^|&)(code|error)=/.test(location.hash.replace(/^#/, ''))
 }
 
 /**
@@ -211,7 +212,7 @@ let refreshing: Promise<Session | null> | null = null
  * is close to expiry. Returns null when the user has to sign in again.
  */
 export async function refreshIfNeeded(cfg: EntraConfig, session: Session): Promise<Session | null> {
-  if (session.exp - Date.now() > 60_000) return session
+  if (session.exp - Date.now() > REFRESH_MARGIN_MS) return session
   // Nothing left to refresh with: the user has to sign in again.
   if (!session.refresh) return null
   if (refreshing) return refreshing

@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "playwright test",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "test:subpath": "playwright test --config playwright.subpath.config.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

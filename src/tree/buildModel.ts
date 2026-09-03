@@ -36,7 +36,7 @@ export async function buildModel(vim: IWebglVim): Promise<ModelElement[]> {
     return withGeometry.map((element) => ({
       index: element.element,
       elementId: String(element.elementId),
-      uniqueId: element.elementUniqueId,
+      uniqueId: element.elementUniqueId || undefined,
     }))
   }
 
@@ -53,7 +53,8 @@ export async function buildModel(vim: IWebglVim): Promise<ModelElement[]> {
     return {
       index: element.element,
       elementId: String(bim?.id ?? element.elementId),
-      uniqueId: bim?.uniqueId ?? element.elementUniqueId,
+      // `||`: vim-web reports a missing UniqueId as an empty string.
+      uniqueId: bim?.uniqueId || element.elementUniqueId || undefined,
       name: bim?.name,
       category: categoryIndex === undefined ? undefined : categoryNameByIndex.get(categoryIndex),
       family: bim?.familyName,

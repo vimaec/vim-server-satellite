@@ -4,6 +4,9 @@ const isCI = !!process.env.CI
 
 export default defineConfig({
   testDir: 'tests',
+  // tests/subpath runs against a preview build served from a sub-path, which
+  // needs its own config and its own web server.
+  testIgnore: 'subpath/**',
   fullyParallel: false,
   // One worker: the viewer needs a WebGL context, and software GL does not like
   // several at once.

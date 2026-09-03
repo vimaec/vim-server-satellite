@@ -36,10 +36,21 @@ export function setAuthBridge(next: AuthBridge | null): void {
   bridge = next
 }
 
+/**
+ * Joins path segments, escaping each one.
+ *
+ * Ids, namespaces and data-store keys all end up inside a URL path, and a key
+ * is arbitrary text: without escaping, a `#` or a space would silently change
+ * which resource is addressed.
+ */
+export function path(...segments: string[]): string {
+  return segments.map(encodeURIComponent).join('/')
+}
+
 export type ApiInit = RequestInit & {
   /** Send no Authorization header (GET /config is anonymous). */
   anonymous?: boolean
-  /** Statuses to hand back instead of throwing, e.g. [404] or [412]. */
+  /** Statuses to hand back instead of throwing, e.g. [404]. */
   allowStatus?: number[]
 }
 
@@ -52,31 +63,39 @@ type ErrorBody = {
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
-  let body: ErrorBody = {}
+  let body: ErrorBody | null = null
   try {
-    body = (await response.json()) as ErrorBody
+    body = (await response.json()) as ErrorBody | null
   } catch {
     // Empty or non-JSON error body: fall back to the status text.
   }
-  const title = body.title ?? body.error ?? response.statusText ?? `HTTP ${response.status}`
-  const detail = body.detail ?? body.message ?? ''
+  // `||` and not `??`: an empty title is as useless as a missing one, and
+  // `statusText` is always '' over HTTP/2, so the status number is the floor.
+  const title = body?.title || body?.error || response.statusText || `HTTP ${response.status}`
+  const detail = body?.detail || body?.message || ''
   return new ApiError(response.status, title, detail)
 }
 
-/** Raw request against `{server}/api/v1{path}`. Throws ApiError on failure. */
-export async function apiRequest(path: string, init: ApiInit = {}): Promise<Response> {
+/** Raw request against `{server}/api/v1{route}`. Throws ApiError on failure. */
+export async function apiRequest(route: string, init: ApiInit = {}): Promise<Response> {
   const { anonymous, allowStatus, headers, ...rest } = init
 
   const merged = new Headers(headers)
   merged.set('Accept', 'application/json')
   if (!anonymous) {
-    const token = await bridge?.getToken()
-    if (token) merged.set('Authorization', `Bearer ${token}`)
+    const token = (await bridge?.getToken()) ?? ''
+    // No token means the session is already gone: the auth layer has said so
+    // once, and a second unauthenticated round trip would only replace its
+    // message with another one.
+    if (!token) {
+      throw new ApiError(401, 'Signed out', 'Sign in again to continue.')
+    }
+    merged.set('Authorization', `Bearer ${token}`)
   }
 
   let response: Response
   try {
-    response = await fetch(`${apiUrl}${path}`, { ...rest, headers: merged, mode: 'cors' })
+    response = await fetch(`${apiUrl}${route}`, { ...rest, headers: merged, mode: 'cors' })
   } catch {
     throw new ApiError(0, 'VIM Server is unreachable', 'Check the network and try again.')
   }
@@ -92,8 +111,8 @@ export async function apiRequest(path: string, init: ApiInit = {}): Promise<Resp
 }
 
 /** Request that returns parsed JSON. */
-export async function apiFetch<T>(path: string, init: ApiInit = {}): Promise<T> {
-  const response = await apiRequest(path, init)
+export async function apiFetch<T>(route: string, init: ApiInit = {}): Promise<T> {
+  const response = await apiRequest(route, init)
   return (await response.json()) as T
 }
 

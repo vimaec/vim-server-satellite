@@ -74,12 +74,40 @@ test.describe('projects', () => {
     await expect(page.getByTestId('label-panel')).toBeVisible()
     await expect(page.getByTestId('viewer-pane')).toBeVisible()
 
-    // The state is the viewer's own now. Waiting for the whole snapshot to
-    // arrive is viewer-labels.spec.ts's job; here it only has to start.
+    // Waiting for the whole snapshot to arrive is viewer-labels.spec.ts's job;
+    // here the load only has to start.
     await expect(page.getByTestId('viewer-status')).toHaveAttribute(
       'data-state',
       /loading|loaded/,
     )
+  })
+
+  test('opening ?project= for a project the user cannot see shows an error', async ({ page }) => {
+    // A project the caller cannot see answers 404, never 403.
+    await page.goto('/?project=p-somebody-elses')
+
+    await expect(page.getByTestId('project-page')).toBeVisible()
+    await expect(page.getByTestId('viewer-status')).toHaveAttribute('data-state', 'error')
+    await expect(page.getByTestId('viewer-status')).toContainText('No such project')
+  })
+
+  test("the project page says loading, not 'no VIM', while lookups are pending", async ({
+    page,
+  }) => {
+    // Hold the snapshot list open, so the page is still resolving on screen.
+    await page.route('**/api/v1/project/p-tiny/vim', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2_500))
+      await route.fallback()
+    })
+    await page.goto('/?project=p-tiny')
+
+    await expect(page.getByTestId('viewer-status')).toHaveAttribute('data-state', 'loading')
+    await expect(page.getByTestId('viewer-status')).toContainText('Opening the project')
+    // "no VIM" would be a lie: the app does not know yet.
+    await expect(page.getByTestId('snapshot-tag')).toHaveText('…')
+    await expect(page.getByTestId('element-tree')).toContainText('Opening the project')
+
+    await expect(page.getByTestId('snapshot-tag')).toHaveText('v3')
   })
 
   test('a project whose snapshot download fails reports an error', async ({ page }) => {

@@ -17,8 +17,14 @@ export type LabelPanelProps = {
   elements: ModelElement[]
   status: LabelsStatus
   error: string
-  /** False for the Viewer role: the whole panel is read-only. */
-  canWrite: boolean
+  /**
+   * Whether the palette and the assignments may be changed. False while the
+   * label state is still loading, and false for the Viewer role.
+   */
+  canEdit: boolean
+  /** The load failed: offer Retry instead of pretending the palette is empty. */
+  loadFailed: boolean
+  onRetry: () => void
   /** How many elements the label actions would touch. */
   selectionCount: number
   onApply: (labelId: string) => void
@@ -33,6 +39,7 @@ export type LabelPanelProps = {
 const NEW_LABEL_COLOR = '#1f6feb'
 
 const STATUS_TEXT: Record<LabelsStatus, string> = {
+  loading: 'Loading the labels…',
   idle: 'Select elements, then pick a label.',
   saving: 'Saving…',
   saved: 'Saved',
@@ -53,7 +60,9 @@ export function LabelPanel({
   elements,
   status,
   error,
-  canWrite,
+  canEdit,
+  loadFailed,
+  onRetry,
   selectionCount,
   onApply,
   onRemove,
@@ -78,7 +87,7 @@ export function LabelPanel({
     return rows.sort((a, b) => a.labelName.localeCompare(b.labelName))
   }, [assignments, elements, labels])
 
-  const canApply = canWrite && selectionCount > 0
+  const canApply = canEdit && selectionCount > 0
 
   return (
     <section className="label-panel" data-testid="label-panel">
@@ -97,7 +106,7 @@ export function LabelPanel({
               className="icon"
               title={`Delete the ${label.name} label`}
               data-testid="label-delete"
-              disabled={!canWrite}
+              disabled={!canEdit}
               onClick={() => onDelete(label.id)}
             >
               ×
@@ -123,7 +132,7 @@ export function LabelPanel({
           data-testid="label-new-name"
           placeholder="New label"
           value={newName}
-          disabled={!canWrite}
+          disabled={!canEdit}
           onChange={(event) => setNewName(event.target.value)}
         />
         <input
@@ -131,10 +140,10 @@ export function LabelPanel({
           data-testid="label-new-color"
           aria-label="New label color"
           value={newColor}
-          disabled={!canWrite}
+          disabled={!canEdit}
           onChange={(event) => setNewColor(event.target.value)}
         />
-        <button type="submit" data-testid="label-new-add" disabled={!canWrite}>
+        <button type="submit" data-testid="label-new-add" disabled={!canEdit}>
           Add
         </button>
       </form>
@@ -142,6 +151,12 @@ export function LabelPanel({
       <p className="label-status small" data-testid="label-status" data-state={status}>
         {status === 'error' && error ? error : STATUS_TEXT[status]}
       </p>
+
+      {loadFailed ? (
+        <button type="button" data-testid="label-retry" onClick={onRetry}>
+          Retry
+        </button>
+      ) : null}
 
       <p className="small">
         <strong data-testid="labelled-count">{labelled.length}</strong> labelled element

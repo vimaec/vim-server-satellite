@@ -6,14 +6,6 @@ export type ServerConfig = {
   clientId: string
 }
 
-export type Profile = {
-  userId?: string
-  firstName?: string
-  lastName?: string
-  email?: string
-  organizations?: { id: string; name: string; role: string }[]
-}
-
 export type OrgSummary = {
   id: string
   name: string
@@ -68,10 +60,13 @@ export type ProjectRole = {
   role: string
 }
 
-/** One entry of the project custom data store, with its write-version ETag. */
+/**
+ * One entry of the project custom data store.
+ *
+ * A list of entries carries no write-versions: the ETag comes back only when a
+ * single entry is read, which is also the only case that can send `If-Match`.
+ */
 export type DataEntry<T> = {
   key: string
   value: T
-  /** Quoted integer, e.g. `"3"`. Absent when the server did not send one. */
-  etag?: string
 }

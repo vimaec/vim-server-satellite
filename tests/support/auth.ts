@@ -69,11 +69,17 @@ export function makeIdToken(claims: Record<string, unknown>): string {
   return `${header}.${payload}.`
 }
 
-/** Answers Entra's token endpoint with a token set the mock server accepts. */
+/** Every form body posted to Entra's token endpoint, oldest first. */
+export type EntraTokenMock = { posts: Record<string, string>[] }
+
+/**
+ * Answers Entra's token endpoint with a token set the mock server accepts, and
+ * records what was posted so a test can prove which grant was used.
+ */
 export async function mockEntraToken(
   page: Page,
   options: { status?: number; body?: Record<string, unknown> } = {},
-): Promise<void> {
+): Promise<EntraTokenMock> {
   const body = options.body ?? {
     token_type: 'Bearer',
     scope: 'openid profile offline_access',
@@ -82,11 +88,14 @@ export async function mockEntraToken(
     refresh_token: 'e2e-refresh',
     id_token: makeIdToken({ name: 'Ada Lovelace', preferred_username: 'ada@example.com' }),
   }
+  const mock: EntraTokenMock = { posts: [] }
   await page.route('https://login.microsoftonline.com/**/oauth2/v2.0/token', async (route) => {
+    mock.posts.push(Object.fromEntries(new URLSearchParams(route.request().postData() ?? '')))
     await route.fulfill({
       status: options.status ?? 200,
       contentType: 'application/json',
       body: JSON.stringify(body),
     })
   })
+  return mock
 }

@@ -15,8 +15,11 @@ import type { Page, Route } from '@playwright/test'
 export const SERVER = process.env.VITE_VIM_SERVER_URL ?? 'https://server-dev.vimaec.com'
 export const API = `${SERVER}/api/v1`
 
-/** The only token the mock accepts; useFakeSession() and mockEntraToken() hand it out. */
+/** The token the mock accepts by default; useFakeSession() hands it out. */
 export const GOOD_TOKEN = 'e2e-token'
+
+/** A second accepted token, for tests that prove a silent refresh happened. */
+export const REFRESHED_TOKEN = 'e2e-token-refreshed'
 
 /** Fake blob storage: where the snapshot SAS URL points. */
 export const BLOB_ORIGIN = 'https://mock-blob.local'
@@ -46,8 +49,18 @@ export type MockOrg = {
   projects: MockProject[]
 }
 
+/** namespace -> key -> { value, version }. `version` is the ETag integer. */
+export type MockStore = Map<string, Map<string, { value: unknown; version: number }>>
+
 export type RecordedWrite =
-  | { kind: 'put'; namespace: string; key: string; value: unknown; ifMatch: string | null }
+  | {
+      kind: 'put'
+      namespace: string
+      key: string
+      value: unknown
+      ifMatch: string | null
+      ifNoneMatch: string | null
+    }
   | { kind: 'put-batch'; namespace: string; entries: { key: string; value: unknown }[] }
   | { kind: 'delete'; namespace: string; keys: string[] }
 
@@ -57,12 +70,18 @@ export type MockOptions = {
   data?: Record<string, Record<string, unknown>>
   /** Answer every authenticated API call with 401 (session-expiry test). */
   unauthorized?: boolean
+  /** Bearer tokens the mock accepts. Defaults to [GOOD_TOKEN]. */
+  tokens?: string[]
+  /**
+   * Called just before a single-entry PUT is evaluated, so a test can act as
+   * another writer between the app's read and its write.
+   */
+  beforeEntryWrite?: (write: { namespace: string; key: string }, store: MockStore) => void
 }
 
 export type MockHandle = {
   orgs: MockOrg[]
-  /** namespace -> key -> { value, version }. `version` is the ETag integer. */
-  store: Map<string, Map<string, { value: unknown; version: number }>>
+  store: MockStore
   writes: RecordedWrite[]
   /** "GET /org", "PUT /project/p-tiny/data/satellite.labels/x", … in order. */
   calls: string[]
@@ -128,7 +147,8 @@ export async function installMockVimServer(
   options: MockOptions = {},
 ): Promise<MockHandle> {
   const orgs = options.orgs ?? defaultOrgs()
-  const store = new Map<string, Map<string, { value: unknown; version: number }>>()
+  const tokens = options.tokens ?? [GOOD_TOKEN]
+  const store: MockStore = new Map()
   for (const [namespace, entries] of Object.entries(options.data ?? {})) {
     const bucket = new Map<string, { value: unknown; version: number }>()
     for (const [key, value] of Object.entries(entries)) bucket.set(key, { value, version: 1 })
@@ -180,7 +200,8 @@ export async function installMockVimServer(
     }
 
     const authorization = await request.headerValue('authorization')
-    if (unauthorized || authorization !== `Bearer ${GOOD_TOKEN}`) {
+    const token = authorization?.replace(/^Bearer /, '') ?? ''
+    if (unauthorized || !tokens.includes(token)) {
       await route.fulfill(problem(401, 'Unauthorized', 'The access token is missing or invalid.'))
       return
     }
@@ -304,10 +325,11 @@ export async function installMockVimServer(
     if (batch) {
       const namespace = decodeURIComponent(batch[1])
       if (method === 'GET') {
+        // A list carries no ETags: the real server sends them only for a
+        // single-entry read, which is the only read that can be written back.
         const entries = [...bucket(namespace)].map(([key, item]) => ({
           key,
           value: item.value,
-          etag: `"${item.version}"`,
         }))
         await route.fulfill(
           json(entries, 200, { 'X-Total-Count': String(entries.length) }),
@@ -356,9 +378,9 @@ export async function installMockVimServer(
     if (single) {
       const namespace = decodeURIComponent(single[1])
       const key = decodeURIComponent(single[2])
-      const existing = bucket(namespace).get(key)
 
       if (method === 'GET') {
+        const existing = bucket(namespace).get(key)
         if (!existing) {
           await route.fulfill(problem(404, 'Not Found', 'No such key.'))
           return
@@ -372,18 +394,30 @@ export async function installMockVimServer(
         return
       }
       if (method === 'PUT') {
+        options.beforeEntryWrite?.({ namespace, key }, store)
+        const existing = bucket(namespace).get(key)
         const ifMatch = await route.request().headerValue('if-match')
+        const ifNoneMatch = await route.request().headerValue('if-none-match')
         const value = route.request().postDataJSON() as unknown
+        const record = (): void => {
+          handle.writes.push({ kind: 'put', namespace, key, value, ifMatch, ifNoneMatch })
+        }
+        // If-None-Match: * is a create-only write.
+        if (ifNoneMatch === '*' && existing) {
+          record()
+          await route.fulfill(problem(412, 'Precondition Failed', 'This entry already exists.'))
+          return
+        }
         // ETag is a quoted write-version; a stale one loses the race.
         if (ifMatch && ifMatch.replace(/"/g, '') !== String(existing?.version ?? 0)) {
-          handle.writes.push({ kind: 'put', namespace, key, value, ifMatch })
+          record()
           await route.fulfill(
             problem(412, 'Precondition Failed', 'Someone else wrote this entry first.'),
           )
           return
         }
         bucket(namespace).set(key, { value, version: (existing?.version ?? 0) + 1 })
-        handle.writes.push({ kind: 'put', namespace, key, value, ifMatch })
+        record()
         await route.fulfill({ status: existing ? 200 : 201, body: '' })
         return
       }

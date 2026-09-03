@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -39,6 +40,13 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # The dev server always serves from '/', so the sub-path build is checked
+      # separately against `vite preview` over the dist/ built above.
+      - name: Sub-path smoke test
+        run: npm run test:subpath
+        env:
+          BASE_PATH: /vim-server-satellite/
 
       - uses: actions/upload-artifact@v4
         if: failure()

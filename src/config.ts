@@ -62,5 +62,21 @@ export function makeEntraConfig(tenantId: string, clientId: string): EntraConfig
   }
 }
 
-/** Fallback used when GET /api/v1/config is unreachable. */
+/** Fallback used when GET /api/v1/config is unreachable or answers nonsense. */
 export const fallbackEntraConfig = makeEntraConfig(envTenantId, envClientId)
+
+/**
+ * Entra ids are GUIDs, or a domain-like tenant name. Both go straight into the
+ * authority URL, so anything outside that alphabet is refused rather than
+ * escaped: a server that answers something else is misconfigured, and the env
+ * values are the safer guess.
+ */
+const ENTRA_ID_PATTERN = /^[A-Za-z0-9.-]+$/
+
+/** Turns the server's answer into a config, falling back when it is unusable. */
+export function entraConfigFrom(server: { tenantId?: string; clientId?: string }): EntraConfig {
+  const { tenantId, clientId } = server
+  if (!tenantId || !ENTRA_ID_PATTERN.test(tenantId)) return fallbackEntraConfig
+  if (!clientId || !ENTRA_ID_PATTERN.test(clientId)) return fallbackEntraConfig
+  return makeEntraConfig(tenantId, clientId)
+}

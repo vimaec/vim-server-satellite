@@ -12,6 +12,7 @@ import * as VIM from 'vim-web'
 
 type ViewerApi = VIM.React.Webgl.ViewerApi
 type IWebglVim = VIM.Core.Webgl.IWebglVim
+type IWebglLoadRequest = VIM.Core.Webgl.IWebglLoadRequest
 
 /** What `viewer-status` reports. */
 export type ViewerStatus = 'idle' | 'loading' | 'loaded' | 'error'
@@ -19,6 +20,11 @@ export type ViewerStatus = 'idle' | 'loading' | 'loaded' | 'error'
 export type ViewerPaneProps = {
   /** The snapshot to show. Undefined means "nothing to load". */
   source: { url: string } | undefined
+  /**
+   * True while the page is still working out which snapshot to show. Undefined
+   * `source` then means "not known yet" rather than "this project has no VIM".
+   */
+  resolving?: boolean
   /** A failure that happened before the viewer got involved (no download URL). */
   sourceError?: string
   /** Element indices that should be selected. Applied to the viewer. */
@@ -42,6 +48,8 @@ const STATUS_TEXT: Record<ViewerStatus, string> = {
   error: 'Could not load the snapshot.',
 }
 
+const RESOLVING_TEXT = 'Opening the project…'
+
 /** The element indices currently selected in the viewer. */
 function selectedIndices(viewer: ViewerApi): number[] {
   return viewer.core.selection
@@ -59,6 +67,7 @@ function sameIndices(a: number[], b: number[]): boolean {
 
 export function ViewerPane({
   source,
+  resolving,
   sourceError,
   selection,
   colors,
@@ -71,6 +80,8 @@ export function ViewerPane({
   const viewerRef = useRef<ViewerApi | undefined>(undefined)
   const vimRef = useRef<IWebglVim | undefined>(undefined)
   const unsubRef = useRef<(() => void) | undefined>(undefined)
+  /** The load in flight, so a superseded one can be told to stop downloading. */
+  const requestRef = useRef<IWebglLoadRequest | undefined>(undefined)
   /** Monotonic: an older load that finishes late must not overwrite a newer one. */
   const loadIdRef = useRef(0)
   /**
@@ -79,6 +90,12 @@ export function ViewerPane({
    * would travel back up to the parent as if the user had clicked in 3D.
    */
   const applyingSelfRef = useRef(false)
+  /**
+   * The color this pane last gave each element index. Assigning `element.color`
+   * walks that element's meshes, so a changed label must not repaint the other
+   * thousands of elements that did not move.
+   */
+  const coloredRef = useRef<Map<number, string>>(new Map())
 
   const [status, setStatus] = useState<ViewerStatus>('idle')
   const [loadError, setLoadError] = useState('')
@@ -92,7 +109,7 @@ export function ViewerPane({
     handlers.current = { onVimLoaded, onSelectionChanged }
   }, [onVimLoaded, onSelectionChanged])
 
-  const shownStatus: ViewerStatus = sourceError ? 'error' : status
+  const shownStatus: ViewerStatus = sourceError ? 'error' : resolving ? 'loading' : status
   useEffect(() => onStatus(shownStatus), [onStatus, shownStatus])
 
   const ensureViewer = useCallback(async (): Promise<ViewerApi | undefined> => {
@@ -124,6 +141,15 @@ export function ViewerPane({
     return viewer
   }, [])
 
+  /** Drops the loaded snapshot. Never dispose a vim directly; unload it. */
+  const unloadAll = useCallback((): void => {
+    const viewer = viewerRef.current
+    if (viewer) for (const vim of [...viewer.core.vims]) viewer.unload(vim)
+    vimRef.current = undefined
+    coloredRef.current = new Map()
+    handlers.current.onVimLoaded(undefined)
+  }, [])
+
   // Load whenever the source changes. Bumping the load id in the cleanup makes
   // an in-flight load a no-op once it is superseded or the pane goes away.
   useEffect(() => {
@@ -131,6 +157,10 @@ export function ViewerPane({
 
     void (async () => {
       if (!source) {
+        // Nothing to show any more: the previous model has to go, or it would
+        // sit in the view under a status that says there is no VIM.
+        unloadAll()
+        setLoadError('')
         setStatus('idle')
         return
       }
@@ -140,15 +170,16 @@ export function ViewerPane({
         const viewer = await ensureViewer()
         if (!viewer || loadId !== loadIdRef.current) return
 
-        // Only one snapshot at a time. Never dispose a vim directly.
-        for (const previous of [...viewer.core.vims]) viewer.unload(previous)
-        vimRef.current = undefined
-        handlers.current.onVimLoaded(undefined)
+        // Only one snapshot at a time.
+        unloadAll()
 
         // prewarmBim caches the BIM parameter columns in the background, which
         // is what the element tree reads right after this.
         const request = viewer.load({ url: source.url }, { prewarmBim: true })
+        requestRef.current = request
         const result = await request.getResult()
+        // Only if it is still the current one: a newer load may have replaced it.
+        if (requestRef.current === request) requestRef.current = undefined
         if (loadId !== loadIdRef.current) {
           if (result.isSuccess) viewer.unload(result.vim)
           return
@@ -159,6 +190,7 @@ export function ViewerPane({
           return
         }
         vimRef.current = result.vim
+        coloredRef.current = new Map()
         setVimEpoch((epoch) => epoch + 1)
         handlers.current.onVimLoaded(result.vim)
         setStatus('loaded')
@@ -171,8 +203,13 @@ export function ViewerPane({
 
     return () => {
       loadIdRef.current++
+      // The loader keeps issuing Range requests until it is told to stop, and
+      // retries failures forever, so a superseded load must be aborted.
+      const request = requestRef.current
+      requestRef.current = undefined
+      if (request && !request.isCompleted) request.abort()
     }
-  }, [ensureViewer, source])
+  }, [ensureViewer, source, unloadAll])
 
   // Push the controlled selection into the viewer. Selections that came out of
   // the viewer in the first place compare equal here, so they cost nothing.
@@ -195,15 +232,26 @@ export function ViewerPane({
     }
   }, [selection, vimEpoch])
 
-  // Apply the label colors. Elements that are no longer labelled are reset to
-  // undefined, which puts their model color back. No re-render call is needed.
+  // Apply the label colors, one element at a time and only where they changed:
+  // what entered the map, what left it, and what kept its index but changed
+  // color. An element that is no longer labelled is reset to undefined, which
+  // puts its model color back. No re-render call is needed.
   useEffect(() => {
     const vim = vimRef.current
     if (!vim) return
-    for (const element of vim.getAllElements()) {
-      const color = colors.get(element.element)
-      element.color = color ? new VIM.THREE.Color(color) : undefined
+    const previous = coloredRef.current
+
+    for (const [index, color] of colors) {
+      if (previous.get(index) === color) continue
+      const element = vim.getElementFromIndex(index)
+      if (element) element.color = new VIM.THREE.Color(color)
     }
+    for (const index of previous.keys()) {
+      if (colors.has(index)) continue
+      const element = vim.getElementFromIndex(index)
+      if (element) element.color = undefined
+    }
+    coloredRef.current = new Map(colors)
   }, [colors, vimEpoch])
 
   // Hand the Frame button a way to move the camera.
@@ -233,7 +281,8 @@ export function ViewerPane({
     [],
   )
 
-  const message = sourceError || loadError || STATUS_TEXT[shownStatus]
+  const message =
+    sourceError || loadError || (resolving ? RESOLVING_TEXT : STATUS_TEXT[shownStatus])
 
   return (
     // position: relative is required — createViewer pins the div it is given to

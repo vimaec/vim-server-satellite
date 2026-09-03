@@ -1,9 +1,8 @@
 /** Typed wrappers over the VIM Server endpoints this app calls. */
-import { apiFetch } from './http'
+import { apiFetch, path } from './http'
 import type {
   DownloadUrl,
   OrgSummary,
-  Profile,
   ProjectDetail,
   ProjectRole,
   ProjectSummary,
@@ -16,17 +15,12 @@ export function getConfig(): Promise<ServerConfig> {
   return apiFetch<ServerConfig>('/config', { anonymous: true })
 }
 
-/** The signed-in user: name, email and the organisations they belong to. */
-export function getProfile(): Promise<Profile> {
-  return apiFetch<Profile>('/profile')
-}
-
 export function listOrgs(): Promise<OrgSummary[]> {
   return apiFetch<OrgSummary[]>('/org')
 }
 
 export function listProjects(orgId: string): Promise<ProjectSummary[]> {
-  return apiFetch<ProjectSummary[]>(`/org/${orgId}/project`)
+  return apiFetch<ProjectSummary[]>(`/${path('org', orgId, 'project')}`)
 }
 
 export type OrgProjects = { org: OrgSummary; projects: ProjectSummary[] }
@@ -46,25 +40,26 @@ export async function listAccessibleProjects(): Promise<OrgProjects[]> {
 }
 
 export function getProject(projectId: string): Promise<ProjectDetail> {
-  return apiFetch<ProjectDetail>(`/project/${projectId}`)
+  return apiFetch<ProjectDetail>(`/${path('project', projectId)}`)
 }
 
 export function getProjectRole(projectId: string): Promise<ProjectRole> {
-  return apiFetch<ProjectRole>(`/project/${projectId}/role`)
+  return apiFetch<ProjectRole>(`/${path('project', projectId, 'role')}`)
 }
 
 export function getVimHistory(projectId: string): Promise<VimHistory> {
-  return apiFetch<VimHistory>(`/project/${projectId}/vim`)
+  return apiFetch<VimHistory>(`/${path('project', projectId, 'vim')}`)
 }
 
 /**
- * Resolves the snapshot download URL. `redirect=false` asks for the SAS URL as
- * JSON instead of a 302: the viewer needs the URL itself, and following a
- * redirect from fetch would strip nothing but also tell us nothing.
+ * Resolves the snapshot download URL. The viewer needs the URL itself to issue
+ * Range requests, so ask for it as JSON instead of following a 302.
  * Omit `blobId` for the latest snapshot.
  */
 export function getVimDownloadUrl(projectId: string, blobId?: string): Promise<DownloadUrl> {
   const query = new URLSearchParams({ redirect: 'false' })
   if (blobId) query.set('blobId', blobId)
-  return apiFetch<DownloadUrl>(`/project/${projectId}/vim/download?${query.toString()}`)
+  return apiFetch<DownloadUrl>(
+    `/${path('project', projectId, 'vim', 'download')}?${query.toString()}`,
+  )
 }

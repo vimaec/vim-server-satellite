@@ -15,7 +15,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { fallbackEntraConfig, makeEntraConfig, type EntraConfig } from '../config'
+import { entraConfigFrom, fallbackEntraConfig, type EntraConfig } from '../config'
 import { setAuthBridge } from '../api/http'
 import { getConfig } from '../api/vimServer'
 import {
@@ -90,9 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     let cancelled = false
     void (async () => {
       // The server is the authority on the app registration; env vars are the fallback.
-      const config = await getConfig()
-        .then((c) => (c.tenantId && c.clientId ? makeEntraConfig(c.tenantId, c.clientId) : fallbackEntraConfig))
-        .catch(() => fallbackEntraConfig)
+      const config = await getConfig().then(entraConfigFrom).catch(() => fallbackEntraConfig)
       if (cancelled) return
       configRef.current = config
 

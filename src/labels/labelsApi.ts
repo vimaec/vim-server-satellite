@@ -11,6 +11,9 @@ import type { Assignment, Palette } from './types'
 /** The palette namespace holds exactly one entry. */
 const PALETTE_KEY = 'palette'
 
+/** How many times a palette write re-reads and re-applies after a 412. */
+const PALETTE_ATTEMPTS = 3
+
 export type PaletteRead = {
   /** null when the project has no palette yet. */
   palette: Palette | null
@@ -27,24 +30,47 @@ export async function loadPalette(projectId: string): Promise<PaletteRead> {
 }
 
 /**
- * Writes the palette with optimistic concurrency. On 412 (someone else saved
- * first) it reloads to pick up their write-version and retries once; the sample
- * keeps the local palette as the winner rather than merging label lists.
- * Returns the new write-version, which a PUT does not send back.
+ * Read–modify–write of the palette.
+ *
+ * The whole palette is one JSON document that everyone on the project shares,
+ * so writing a locally edited copy would silently drop a label someone else
+ * added a moment ago. Each attempt therefore re-reads the document, applies
+ * `mutate` to what is actually stored, and writes it back under a precondition:
+ * `If-Match` with the version just read, or `If-None-Match: *` when there is no
+ * entry yet, which makes that first write create-only. A 412 means someone else
+ * got in between, so the cycle runs again over their version.
+ *
+ * `mutate` may return null for "leave the stored palette alone".
+ *
+ * Returns the palette that is now on the server, which the caller should adopt:
+ * it includes whatever the other writers did.
  */
-export async function savePalette(
+export async function updatePalette(
   projectId: string,
-  palette: Palette,
-  etag?: string,
-): Promise<{ etag?: string }> {
-  try {
-    await putEntry(projectId, namespaces.palette, PALETTE_KEY, palette, etag)
-  } catch (cause: unknown) {
-    if (!(cause instanceof ApiError) || cause.status !== 412) throw cause
-    const current = await loadPalette(projectId)
-    await putEntry(projectId, namespaces.palette, PALETTE_KEY, palette, current.etag)
+  mutate: (current: Palette | null) => Palette | null,
+): Promise<Palette> {
+  for (let attempt = 0; attempt < PALETTE_ATTEMPTS; attempt++) {
+    const read = await loadPalette(projectId)
+    const next = mutate(read.palette)
+    if (!next) return read.palette ?? { labels: [] }
+    try {
+      await putEntry(
+        projectId,
+        namespaces.palette,
+        PALETTE_KEY,
+        next,
+        read.palette ? { ifMatch: read.etag } : { ifNoneMatch: '*' },
+      )
+      return next
+    } catch (cause: unknown) {
+      if (!(cause instanceof ApiError) || cause.status !== 412) throw cause
+    }
   }
-  return { etag: (await loadPalette(projectId)).etag }
+  throw new ApiError(
+    412,
+    'Could not save the palette',
+    'Someone else keeps editing it. Try again.',
+  )
 }
 
 /** Every assignment in the project, keyed by element key. */
