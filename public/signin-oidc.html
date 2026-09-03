@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Signing in…</title>
+  </head>
+  <body>
+    <p>Signing in…</p>
+    <!--
+      Entra returns to this registered redirect URI with the reply in the URL
+      fragment. Nothing is stored here: the page only forwards the fragment to
+      the app root, where the PKCE verifier lives, and the app finishes the
+      code exchange there.
+    -->
+    <script>
+      location.replace('./' + location.hash)
+    </script>
+  </body>
+</html>
