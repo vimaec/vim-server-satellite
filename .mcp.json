@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "vim-server-dev": {
+      "type": "http",
+      "url": "https://server-dev.vimaec.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${VIM_SERVER_DEV_MCP_PAT}"
+      }
+    }
+  }
+}
