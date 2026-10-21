@@ -17,7 +17,7 @@ if (!container) throw new Error('#root is missing from index.html')
 installDebugHook()
 
 // No <StrictMode>: it mounts every component twice, and the vim-web viewer
-// leaks a WebGL context per mount. See viewer.md.
+// leaks a WebGL context per mount.
 createRoot(container).render(
   <AuthProvider>
     <App />
