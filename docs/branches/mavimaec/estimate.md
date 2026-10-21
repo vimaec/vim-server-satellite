@@ -90,7 +90,7 @@
 ## Changelist
 
 - Replace the colored-label sample with a port of the VIM Flex Estimate workflow: estimation sheets, cost codes, work packages, markups and total
-- Attach estimate data (work package, cost code, extra, note, included/excluded) to the elements of the VIM model loaded in the vim-web viewer, keyed by Revit UniqueId
+- Attach estimate data (work package, cost code, extra, note, included/excluded) to the elements of the VIM model loaded in the vim-web viewer, keyed by Revit UniqueId only (never the element index or ElementId); lump sums sit on the element with the lowest UniqueId
 - Save and reload all estimate data in the project's VIM Server data store (`estimate.*` namespaces); browsing never writes
 - Compute quantities (length, area, volume) from the VIM's BIM parameters and materials, and price elements as the original workflow does
 - Group the element tree by configurable levels, color the 3D view by cost or by a grouping level (bright colors that match the tree swatches and the cost legend), and hide excluded elements in 3D
