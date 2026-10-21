@@ -159,10 +159,14 @@ test.describe('sign-in', () => {
     await page.goto('/')
 
     await expect(page.getByTestId('project-picker')).toBeVisible()
+    // Wait for the whole project list, so the 401 cannot land in the middle of it.
+    const firstProject = page.getByTestId('project-item').first()
+    await expect(firstProject).toBeVisible()
+    await expect(firstProject).toBeEnabled()
 
     // The token stops being accepted between the picker and the project page.
     mock.setUnauthorized(true)
-    await page.getByTestId('project-item').first().click()
+    await firstProject.click()
 
     await expect(page.getByTestId('signin-page')).toBeVisible()
     await expect(page.getByTestId('signin-error')).toContainText('expired')
