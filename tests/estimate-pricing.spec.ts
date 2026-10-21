@@ -1,6 +1,7 @@
 /**
- * The estimate's pure functions: pricing, totals, the cost ramp, grouping,
- * the translator. No browser page: these run in the test runner's Node.
+ * The estimate's pure functions: pricing, totals, the cost ramp, the data
+ * colours, grouping, the translator. No browser page: these run in the test
+ * runner's Node.
  */
 import { expect, test } from '@playwright/test'
 import {
@@ -19,11 +20,17 @@ import type { GroupNode, TreeNode } from '../src/estimate/grouping'
 import { makeT, money, parseNumber } from '../src/estimate/i18n'
 import {
   COST_STOPS,
+  DATA_LIFT,
   WHITE,
+  categoricalPalette,
   codeUsage,
   computeTotals,
   costColors,
+  costRamp,
+  hexToOklch,
   levelColors,
+  liftColor,
+  oklchToHex,
   priceRows,
   rampColor,
 } from '../src/estimate/pricing'
@@ -237,6 +244,94 @@ test.describe('cost ramp', () => {
     expect(a.byElement.get(2)).toBe(WHITE)
     expect(a.byElement.get(0)).not.toBe(a.byElement.get(1))
     expect([...a.byValue]).toEqual([...b.byValue])
+  })
+})
+
+test.describe('data colours', () => {
+  /**
+   * The DS tokens the data colours come from: --chart-1..4, then --health-green,
+   * --health-amber, --en-cost-warm and --en-cost-hot. There is no DOM here, so
+   * pricing.ts reads its fallbacks, which are these values.
+   */
+  const CHART = ['#3DB8F5', '#2BA39A', '#9B8CFA', '#E96A2A']
+  const COST = ['#6FB582', '#E9B23A', '#EE8A2E', '#E2483D']
+
+  /** The angle between two hues, 0..180. */
+  const hueGap = (a: number, b: number): number => Math.abs(((a - b + 540) % 360) - 180)
+
+  /** Oklab distance: about 0.02 is the smallest difference the eye sees. */
+  function distance(x: string, y: string): number {
+    const [a, b] = [x, y].map((hex) => {
+      const [l, c, h] = hexToOklch(hex)
+      return [l, c * Math.cos((h * Math.PI) / 180), c * Math.sin((h * Math.PI) / 180)]
+    })
+    return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+  }
+
+  test('OKLCH converts both ways without loss', () => {
+    for (const hex of ['#3db8f5', '#e96a2a', '#6fb582', '#0b121c', '#ffffff', '#000000', '#ff0000', '#00ffff']) {
+      expect(oklchToHex(...hexToOklch(hex))).toBe(hex)
+    }
+    const [lightness, chroma] = hexToOklch('#ffffff')
+    expect(lightness).toBeCloseTo(1, 3)
+    expect(chroma).toBeCloseTo(0, 3)
+  })
+
+  test('a colour outside sRGB loses chroma, not its lightness or hue', () => {
+    const [lightness, chroma, hue] = hexToOklch(oklchToHex(0.8, 0.4, 30))
+    expect(lightness).toBeCloseTo(0.8, 2)
+    expect(hueGap(hue, 30)).toBeLessThan(2)
+    expect(chroma).toBeLessThan(0.4)
+  })
+
+  test('liftColor makes a DS colour lighter and keeps its hue', () => {
+    for (const hex of [...CHART, ...COST]) {
+      const [l0, c0, h0] = hexToOklch(hex)
+      const [l1, c1, h1] = hexToOklch(liftColor(hex))
+      expect(l1 - l0).toBeCloseTo(DATA_LIFT.lightness, 2)
+      expect(hueGap(h1, h0)).toBeLessThan(1)
+      // Chroma × DATA_LIFT.chroma, as far as sRGB allows at the new lightness.
+      expect(c1).toBeLessThanOrEqual(c0 * DATA_LIFT.chroma + 0.002)
+      expect(c1).toBeGreaterThan(c0 * 0.75)
+    }
+  })
+
+  test('the cost ramp is the DS heat colours, lifted, at each stop', () => {
+    const [green, amber, warm, hot] = COST.map(liftColor)
+    expect(costRamp()).toEqual([green, green, amber, warm, hot])
+    expect(costRamp()).toHaveLength(COST_STOPS.length)
+  })
+
+  test('the categorical palette is the same for a seed, and another seed re-rolls it', () => {
+    expect(categoricalPalette(0)).toEqual([])
+    expect(categoricalPalette(8, 0)).toEqual(categoricalPalette(8, 0))
+    expect(categoricalPalette(8, 3)).toEqual(categoricalPalette(8, 3))
+    expect(categoricalPalette(8, 1)).not.toEqual(categoricalPalette(8, 0))
+    // Seed 0 starts the walk at the DS primary series' hue.
+    const [, , first] = hexToOklch(categoricalPalette(1, 0)[0])
+    expect(hueGap(first, hexToOklch(CHART[0])[2])).toBeLessThan(1)
+  })
+
+  test('the categorical palette is lighter than the DS series and skips the outline cyan', () => {
+    const chartLightness = CHART.reduce((sum, hex) => sum + hexToOklch(hex)[0], 0) / CHART.length
+    for (let seed = 0; seed < 6; seed++) {
+      for (const hex of categoricalPalette(60, seed)) {
+        const [lightness, chroma, hue] = hexToOklch(hex)
+        // The two lightness bands, DATA_LIFT above the series' mean ± 0.04.
+        expect(lightness).toBeGreaterThan(chartLightness + 0.02)
+        expect(lightness).toBeLessThan(chartLightness + 0.12)
+        // A colour, not a grey that could pass for the ghost fill or white.
+        expect(chroma).toBeGreaterThan(0.09)
+        // Nowhere near the selection outline (#00ffff, hue 195°).
+        expect(hue < 166 || hue > 224, `${hex} has hue ${hue}`).toBe(true)
+      }
+      const eight = categoricalPalette(8, seed)
+      for (let i = 0; i < eight.length; i++) {
+        for (let j = i + 1; j < eight.length; j++) {
+          expect(distance(eight[i], eight[j]), `${eight[i]} vs ${eight[j]}`).toBeGreaterThan(0.08)
+        }
+      }
+    }
   })
 })
 

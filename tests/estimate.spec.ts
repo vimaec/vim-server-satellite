@@ -13,6 +13,7 @@ import { defaultOrgs, installMockVimServer } from './support/mockVimServer'
 import type { MockHandle, MockOptions, RecordedWrite } from './support/mockVimServer'
 import { useFakeSession } from './support/auth'
 import { fixtureElement } from './support/fixture'
+import { hexToRgb } from '../src/estimate/pricing'
 
 /** Parsing and building the whole snapshot under software GL is not quick. */
 const LOAD_TIMEOUT = 60_000
@@ -112,11 +113,11 @@ async function pick(page: Page, select: Locator, value: string): Promise<void> {
 
 /**
  * The colour of one screen pixel (CSS px of the viewport) as the page shows it,
- * `rgb(r, g, b)`: a 1 × 1 screenshot, decoded here. The PNG is 8-bit RGB(A),
- * and for a single pixel every PNG row filter leaves the bytes as they are, so
- * the inflated data is one filter byte followed by the channels.
+ * `[r, g, b]`: a 1 × 1 screenshot, decoded here. The PNG is 8-bit RGB(A), and
+ * for a single pixel every PNG row filter leaves the bytes as they are, so the
+ * inflated data is one filter byte followed by the channels.
  */
-async function screenPixel(page: Page, x: number, y: number): Promise<string> {
+async function screenRgb(page: Page, x: number, y: number): Promise<[number, number, number]> {
   const png = await page.screenshot({ clip: { x: Math.round(x), y: Math.round(y), width: 1, height: 1 } })
   const chunks: Buffer[] = []
   for (let at = 8; at < png.length; ) {
@@ -127,7 +128,33 @@ async function screenPixel(page: Page, x: number, y: number): Promise<string> {
     at += 12 + length
   }
   const [, r, g, b] = inflateSync(Buffer.concat(chunks))
-  return `rgb(${r}, ${g}, ${b})`
+  return [r, g, b]
+}
+
+/** screenRgb as CSS writes it, `rgb(r, g, b)`. */
+async function screenPixel(page: Page, x: number, y: number): Promise<string> {
+  return `rgb(${(await screenRgb(page, x, y)).join(', ')})`
+}
+
+/**
+ * A `#rrggbb` as vim-web stores an element colour override: each channel
+ * rounded to one of 25 levels (its colour palette texture, `colorToIndex`).
+ */
+function vimPaletteRgb(hex: string): [number, number, number] {
+  const level = (v: number): number => Math.round((Math.round((v / 255) * 24) / 24) * 255)
+  return [level(parseInt(hex.slice(1, 3), 16)), level(parseInt(hex.slice(3, 5), 16)), level(parseInt(hex.slice(5, 7), 16))]
+}
+
+/**
+ * How bright `pixel` is as a shade of `rgb`: the k for which k × rgb is
+ * nearest to it, or null when no k is within `tolerance` on every channel
+ * (then the pixel is some other colour). vim-web's shading multiplies all
+ * three channels of an element's colour by one factor, so a face of the
+ * element shows its colour scaled, with the same hue and saturation.
+ */
+function shadeOf(pixel: readonly number[], rgb: readonly number[], tolerance = 6): number | null {
+  const k = (pixel[0] * rgb[0] + pixel[1] * rgb[1] + pixel[2] * rgb[2]) / (rgb[0] ** 2 + rgb[1] ** 2 + rgb[2] ** 2)
+  return pixel.every((v, i) => Math.abs(v - k * rgb[i]) <= tolerance) ? k : null
 }
 
 // ---- the store ---------------------------------------------------------------------------------
@@ -415,6 +442,11 @@ test.describe('estimate', () => {
     expect(dearer).not.toBe('#ffffff')
     // Ranked: the cheapest coded element is the green end, the dearest the red end.
     expect(cheaper).not.toBe(dearer)
+    // The legend is drawn with the same colours: it starts at the cheapest and ends at the dearest.
+    const legend = page.getByTestId('cost-legend').locator('.en-legend__bar')
+    const gradient = await legend.evaluate((bar) => getComputedStyle(bar).backgroundImage)
+    expect(gradient).toContain(`rgb(${hexToRgb(cheaper as string).join(', ')}) 0%`)
+    expect(gradient).toContain(`rgb(${hexToRgb(dearer as string).join(', ')}) 100%`)
 
     await pick(page, page.getByTestId('display-select'), 'none')
     await expect.poll(() => color(WINDOW)).toBeUndefined()
@@ -998,6 +1030,38 @@ test.describe('estimate', () => {
     await page.keyboard.press('ControlOrMeta+x')
     await expect.poll(() => page.evaluate((index) => window.__vimSatellite?.isElementHidden(index), WALL)).toBe(true)
     await expect(page.locator('.vim-control-bar-button[data-tip="Show All"]')).toHaveAttribute('data-on', 'true')
+  })
+
+  test('an element shows its Display colour on screen, as its row swatch does', async ({ page }) => {
+    await openEstimate(page)
+    await pick(page, page.getByTestId('display-select'), 'level:category')
+    await expect.poll(() => page.evaluate((i) => window.__vimSatellite?.getElementColor(i), WALL)).toMatch(/^#/)
+    const wall = (await page.evaluate((i) => window.__vimSatellite?.getElementColor(i), WALL)) as string
+
+    // The tree's swatch for the Walls group is the same colour.
+    await page.getByTestId('tree-expand').click()
+    const swatch = page.locator('[data-testid="tree-row"][data-key$="category:Walls"] .ds-seldot')
+    await expect(swatch).toHaveCSS('background-color', `rgb(${hexToRgb(wall).join(', ')})`)
+
+    // On screen, the walls' faces are that colour times vim-web's shading (0.5 to 1 per face):
+    // the same hue and saturation, never the darker, more saturated colour that the hex
+    // converted from sRGB to linear would give. The walls take a large part of the framed
+    // house, so a coarse grid over the 3D view lands on several of their faces.
+    const box = await page.getByTestId('viewer-pane').boundingBox()
+    if (!box) throw new Error('The viewer pane has no box')
+    const target = vimPaletteRgb(wall)
+    const shades: number[] = []
+    for (let row = 1; row < 10; row++) {
+      for (let col = 1; col < 10; col++) {
+        const pixel = await screenRgb(page, box.x + (box.width * col) / 10, box.y + (box.height * row) / 10)
+        const k = shadeOf(pixel, target)
+        if (k !== null && k >= 0.4) shades.push(k)
+      }
+    }
+    expect(shades.length, `samples on the walls (${wall})`).toBeGreaterThanOrEqual(4)
+    // The best-lit face is close to the swatch itself.
+    expect(Math.max(...shades)).toBeGreaterThan(0.75)
+    expect(Math.max(...shades)).toBeLessThan(1.05)
   })
 
   test('the control bar is drawn in the DS theme', async ({ page }) => {

@@ -80,6 +80,7 @@
 - [ ] Select an element, then click Help in the control bar; the Help close button in the top-right corner is not covered by "Cost Details"
 - [ ] On "MEP Estimate Sheet" in Medical Tower Project, check the header box (include all), then uncheck it again; both complete with no CORS error in the browser console and no error toast
 - [ ] Open "Medical Tower Project", select "MEP Estimate Sheet"; only MEP elements show in 3D, grouped by the six MasterFormat work packages, TOTAL about $47.1M (direct about $34.4M)
+- [ ] Display › Colors by Category, then Display › Costs; the 3D colors are light and clear on the dark background, and a lit face matches its tree swatch or the cost legend
 
 ## General Notes
 
@@ -89,7 +90,7 @@
 - Attach estimate data (work package, cost code, extra, note, included/excluded) to the elements of the VIM model loaded in the vim-web viewer, keyed by Revit UniqueId
 - Save and reload all estimate data in the project's VIM Server data store (`estimate.*` namespaces); browsing never writes
 - Compute quantities (length, area, volume) from the VIM's BIM parameters and materials, and price elements as the original workflow does
-- Group the element tree by configurable levels, color the 3D view by cost or by a grouping level, and hide excluded elements in 3D
+- Group the element tree by configurable levels, color the 3D view by cost or by a grouping level (bright colors that match the tree swatches and the cost legend), and hide excluded elements in 3D
 - Add the Cost Details pane, Set Cost Code / Set Work Package dialogs, context menus in the tree and the 3D view, and Ctrl+C / Ctrl+V / Ctrl+X shortcuts
 - Add the EN / 日本語 language switch
 - Keep view settings (active sheet, grouping, display, language) per user in the browser

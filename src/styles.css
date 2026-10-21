@@ -331,7 +331,8 @@ body .vim-tooltip-portal {
 
 :root {
   /* The upper end of the Costs colours in 3D (data, not UI, as estimate.html):
-     orange at the 90th percentile, red at the top. pricing.ts costRamp() reads them. */
+     orange at the 90th percentile, red at the top. pricing.ts costRamp() reads them
+     and lifts them for the 3D view (liftColor), as it does the DS green and amber. */
   --en-cost-warm: #ee8a2e;
   --en-cost-hot: #e2483d;
   /* One tree row, and the inline controls drawn to fit in it. */

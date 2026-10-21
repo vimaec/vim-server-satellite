@@ -173,6 +173,13 @@ estimate's excluded elements (it hides them with `element.visible = false`), and
 bar's Isolate Selection and Hide Selection leave out. vim-web's isolation settings panel can change
 the opacity for the session; with `canReadLocalStorage: false` the change is not kept.
 
+The Display colours go to vim-web per element (`element.color`), built the same way again
+(`rendererColor`): vim-web keeps an override's channels in its colour palette texture (25 levels
+per channel) and its model shader writes them times the face's shading, with no sRGB step. So a
+face in full light shows the hex that the tree swatch and the cost legend show;
+`new THREE.Color(hex)` would convert it to linear first and draw it darker and more saturated
+(`#b03b53` came out as `#630a14` on a lit wall).
+
 vim-web's control bar and the panels it opens are restyled in the DS theme by the "vim-web control
 bar" section of `src/styles.css`, scoped to `.viewer-pane`: flat `--stage` groups with a 1px
 hairline, no shadow, and buttons that follow the DS icon button (`--ds-radius-btn`, the `--text`
@@ -370,8 +377,21 @@ total    = direct × (1 + Σ markup % / 100)
 A `lump` code charges its unit price once, on the lowest element index that carries it. An element
 whose code needs a quantity that the element does not have is **missing**: it costs only its extra,
 and the footer counts it. Display "Costs" colours each coded element by its rank among the coded
-elements (green over the lowest quarter, amber at the median, red at the top), rounded to 33 colour
-steps, and leaves uncoded elements white.
+elements (green over the lowest quarter, amber at the median, orange at the 90th percentile, red
+at the top), rounded to 33 colour steps, and leaves uncoded elements white.
+
+The Display colours are DS colours made lighter for the 3D view, where a colour covers whole faces
+and the shading darkens every face that does not face the light (`src/estimate/pricing.ts`). The
+lift is done in OKLCH, where equal steps look equal: `liftColor` adds 0.07 to the lightness and
+multiplies the chroma by 1.15 as far as sRGB allows, and keeps the hue. The cost ramp is
+`--health-green`, `--health-amber`, `--en-cost-warm` and `--en-cost-hot` lifted this way. "Colors
+by <level>" takes `categoricalPalette`: the mean lightness and chroma of `--chart-1` to `--chart-4`,
+lifted the same way and alternating ± 0.04 in lightness so that neighbours differ in lightness
+too, on hues that walk the golden angle from `--chart-1`'s hue and skip 165°–225°, the cyan of
+vim-web's selection outline. The shuffle button changes the seed, which starts the walk at another
+hue and shuffles the order; a seed always gives the same colours. A group with no value stays
+white. The tree's swatches and the cost legend draw these same values; the DS tokens themselves are
+not changed.
 
 ### Design system
 
@@ -520,8 +540,8 @@ The specs:
 |---|---|
 | `auth.spec.ts` | Sign-in page, the PKCE reply and its `state` check, Entra errors, sign out, silent refresh, a refused refresh, the `/config` fallback, a `401` while signed in |
 | `projects.spec.ts` | The picker by organisation, a project without a VIM, the project page (title, snapshot, role), `?project=` across a reload, a hidden project, the loading and download-error states |
-| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Reload (changes made on the server, a deleted active sheet, a Viewer; an edit still being written, an edit made while it reads), the viewer background, the ghost colour, the DS control bar, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
-| `estimate-pricing.spec.ts` | The pure functions: pricing, totals and markups, the lump-sum and missing rules, the cost ramp, colours by level, grouping and search, the cost code tree, number parsing |
+| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost and its legend, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Reload (changes made on the server, a deleted active sheet, a Viewer; an edit still being written, an edit made while it reads), the viewer background, the ghost colour, a Display colour sampled on screen against its swatch, the DS control bar, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
+| `estimate-pricing.spec.ts` | The pure functions: pricing, totals and markups, the lump-sum and missing rules, the cost ramp, the data colours (OKLCH lift, categorical palette), colours by level, grouping and search, the cost code tree, number parsing |
 | `estimate-quantities.spec.ts` | `readFacts()` on the fixture: metric lengths, areas and volumes, material fallbacks, names from the BIM tables |
 | `mock-server.spec.ts` | The harness itself: Range replies, data store preconditions, the bearer check |
 | `subpath/smoke.spec.ts` | A `BASE_PATH` build under `vite preview`: boot, favicon, the Entra redirect page |

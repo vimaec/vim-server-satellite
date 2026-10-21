@@ -38,6 +38,11 @@ function rendererBackground(): VIM.THREE.Color {
 /**
  * A `#rrggbb` for a colour vim-web writes to the screen as it holds it: its
  * sRGB values kept as they are (tagged linear, so three.js does not convert).
+ * That is the background, the ghost fill, and the element colour overrides:
+ * vim-web stores an override's channels as bytes in its colour palette
+ * texture and its model shader writes them × the shading, with no sRGB step.
+ * Parsed as sRGB, a colour comes out darker and more saturated than its hex
+ * (#b03b53 was drawn as #630a14 on a lit wall: its linear values, shaded).
  */
 function rendererColor(hex: string): VIM.THREE.Color {
   return new VIM.THREE.Color().setStyle(hex, VIM.THREE.LinearSRGBColorSpace)
@@ -388,7 +393,8 @@ export function ViewerPane({
   // Apply the colors, one element at a time and only where they changed: what
   // entered the map, what left it, and what kept its index but changed color.
   // An element that left the map is reset to undefined, which puts its model
-  // color back. No re-render call is needed.
+  // color back. No re-render call is needed. Each colour goes through
+  // rendererColor, so a face in full light shows the hex the panel shows.
   useEffect(() => {
     const vim = vimRef.current
     if (!vim) return
@@ -397,7 +403,7 @@ export function ViewerPane({
     for (const [index, color] of colors) {
       if (previous.get(index) === color) continue
       const element = vim.getElementFromIndex(index)
-      if (element) element.color = new VIM.THREE.Color(color)
+      if (element) element.color = rendererColor(color)
     }
     for (const index of previous.keys()) {
       if (colors.has(index)) continue

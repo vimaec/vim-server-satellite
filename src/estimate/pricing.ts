@@ -222,32 +222,142 @@ function seededRandom(seed: number): () => number {
   }
 }
 
-function hslHex(h: number, s: number, l: number): string {
-  const c = (1 - Math.abs(2 * l - 1)) * s
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
-  const m = l - c / 2
-  const segment = Math.floor((((h % 360) + 360) % 360) / 60)
-  const rgb = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][segment]
-  return `#${rgb.map((v) => Math.round((v + m) * 255).toString(16).padStart(2, '0')).join('')}`
+// OKLCH (Björn Ottosson's Oklab in polar form: lightness 0..1, chroma, hue in
+// degrees). The data colours are adjusted in it, not in HSL, because equal
+// steps in it look equal: a lift brightens a yellow and a blue alike, and a
+// hue walk at one lightness gives colours that look equally light.
+
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+}
+
+function linearToSrgb(c: number): number {
+  return c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055
+}
+
+/** `#rrggbb` as OKLCH `[lightness, chroma, hue°]`. */
+export function hexToOklch(color: string): [number, number, number] {
+  const [r, g, b] = hexToRgb(color).map((v) => srgbToLinear(v / 255))
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  const lightness = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+  return [lightness, Math.hypot(a, bb), ((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360]
+}
+
+/** OKLCH as linear sRGB, unclamped: a channel outside 0..1 means "outside the sRGB gamut". */
+function oklchToLinear(lightness: number, chroma: number, hue: number): number[] {
+  const a = chroma * Math.cos((hue * Math.PI) / 180)
+  const b = chroma * Math.sin((hue * Math.PI) / 180)
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ]
+}
+
+function inGamut(linear: number[]): boolean {
+  return linear.every((v) => v >= -1e-6 && v <= 1 + 1e-6)
+}
+
+/**
+ * OKLCH as `#rrggbb`. A colour the screen cannot show loses chroma (found by
+ * bisection) rather than being clipped per channel, so it keeps its hue and
+ * its lightness: a clipped channel would shift the hue.
+ */
+export function oklchToHex(lightness: number, chroma: number, hue: number): string {
+  let c = chroma
+  if (!inGamut(oklchToLinear(lightness, c, hue))) {
+    let lo = 0
+    let hi = chroma
+    for (let k = 0; k < 24; k++) {
+      const mid = (lo + hi) / 2
+      if (inGamut(oklchToLinear(lightness, mid, hue))) lo = mid
+      else hi = mid
+    }
+    c = lo
+  }
+  return rgbToHex(
+    oklchToLinear(lightness, c, hue).map((v) => linearToSrgb(Math.min(1, Math.max(0, v))) * 255),
+  )
+}
+
+/**
+ * How much brighter the 3D data colours are than the DS tokens they come
+ * from: OKLCH lightness + 0.07 and chroma × 1.15. The tokens are tuned for
+ * small marks on the dark UI; in 3D a colour covers whole faces, and vim-web's
+ * shading darkens every face that does not face its light (to half, at
+ * worst), so the same values read dull there. Moderate on purpose: more
+ * lightness washes the colours toward white, which is the "no value" colour.
+ */
+export const DATA_LIFT = { lightness: 0.07, chroma: 1.15 } as const
+
+/** A DS colour as a 3D data colour: DATA_LIFT applied in OKLCH, the hue kept. */
+export function liftColor(color: string): string {
+  const [lightness, chroma, hue] = hexToOklch(color)
+  return oklchToHex(Math.min(1, lightness + DATA_LIFT.lightness), chroma * DATA_LIFT.chroma, hue)
 }
 
 const GOLDEN_ANGLE = 137.508
 
 /**
- * `n` mutually distinct colours as `#rrggbb` (the DS categorical palette).
- * Hues walk the golden angle; lightness alternates between two bands. A seed
- * other than 0 rotates the walk and shuffles the assignment: the "shuffle"
- * button. The same seed always gives the same array.
+ * The OKLCH hues the categorical palette leaves out: the cyan of vim-web's
+ * selection outline (#00ffff, hue 195°) ± 30°, so an outlined element never
+ * looks like one coloured by the data. (This also drops the DS teal, 187°.)
+ */
+const OUTLINE_HUES = { from: 165, to: 225 } as const
+
+/** The categorical palette's hue for a position 0..360 on its walk: the circle minus OUTLINE_HUES. */
+function walkHue(position: number): number {
+  const gap = OUTLINE_HUES.to - OUTLINE_HUES.from
+  const hue = (position * (360 - gap)) / 360
+  return hue < OUTLINE_HUES.from ? hue : hue + gap
+}
+
+/** The inverse of walkHue, for a hue outside OUTLINE_HUES. */
+function walkPosition(hue: number): number {
+  const gap = OUTLINE_HUES.to - OUTLINE_HUES.from
+  return ((hue < OUTLINE_HUES.from ? hue : hue - gap) * 360) / (360 - gap)
+}
+
+/** The DS categorical series the palette is derived from (the grey --chart-5 is not a category colour). */
+function chartTokens(): string[] {
+  return [
+    token('--chart-1', '#3DB8F5'),
+    token('--chart-2', '#2BA39A'),
+    token('--chart-3', '#9B8CFA'),
+    token('--chart-4', '#E96A2A'),
+  ]
+}
+
+/**
+ * `n` mutually distinct colours as `#rrggbb`, for "Colors by <level>" in 3D
+ * and in the tree's row swatches. Derived from the DS chart series in OKLCH:
+ * - lightness and chroma: the mean of --chart-1..4 lifted by DATA_LIFT, the
+ *   lightness alternating ± 0.04 around it so that neighbours in the walk
+ *   also differ in lightness;
+ * - hue: a golden-angle walk from --chart-1's hue (the DS primary series), over
+ *   the circle minus the selection outline's cyan (OUTLINE_HUES).
+ * A seed other than 0 starts the walk at a random hue and shuffles the
+ * assignment: the "shuffle" button. The same seed always gives the same array.
  */
 export function categoricalPalette(n: number, seed = 0): string[] {
   if (n <= 0) return []
+  const series = chartTokens().map(hexToOklch)
+  const mean = (k: number): number => series.reduce((sum, color) => sum + color[k], 0) / series.length
+  const lightness = mean(0) + DATA_LIFT.lightness
+  const chroma = mean(1) * DATA_LIFT.chroma
   const rand = seededRandom(seed)
-  const offset = seed === 0 ? 20 : rand() * 360
+  const offset = seed === 0 ? walkPosition(series[0][2]) : rand() * 360
   const out: string[] = []
   for (let i = 0; i < n; i++) {
-    const hue = (offset + i * GOLDEN_ANGLE) % 360
-    const light = i % 2 === 0
-    out.push(hslHex(hue, light ? 0.62 : 0.5, light ? 0.62 : 0.46))
+    const hue = walkHue((offset + i * GOLDEN_ANGLE) % 360)
+    out.push(oklchToHex(lightness + (i % 2 === 0 ? 0.04 : -0.04), chroma, hue))
   }
   if (seed === 0) return out
   for (let i = out.length - 1; i > 0; i--) {
@@ -266,12 +376,15 @@ export const COST_STOPS = [0, 0.25, 0.5, 0.9, 1]
 /**
  * The cost ramp: DS green over the lowest quarter, DS amber at the median,
  * orange at the 90th percentile, red at the top, so only the top tenth reads
- * red. (The DS ramp's own hot end already reads red under the 3D shading; it
- * would turn the whole upper half red.) One colour per COST_STOPS entry.
+ * red. (The DS ramp's own hot end is already red-orange; it would turn the
+ * whole upper half red.) One colour per COST_STOPS entry, each lifted for the
+ * 3D view (liftColor); the legend draws these same values.
  */
 export function costRamp(): string[] {
   const [green, amber] = heatGradient()
-  return [green, green, amber, token('--en-cost-warm', '#EE8A2E'), token('--en-cost-hot', '#E2483D')]
+  return [green, green, amber, token('--en-cost-warm', '#EE8A2E'), token('--en-cost-hot', '#E2483D')].map(
+    liftColor,
+  )
 }
 
 /** The legend bar's background: the ramp at its stops (the gradient IS the data). */
