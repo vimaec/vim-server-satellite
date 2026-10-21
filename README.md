@@ -482,17 +482,23 @@ changed.
 ### Design system
 
 `src/ds/` is a copy of the [vim-html-ds](https://github.com/vimaec/vim-html-ds) design system:
-`ds.css` and `fonts/*` copied verbatim (Retina for titles, Roboto for body text and numbers, and
-FluentUI System Icons under MIT), plus React components that render the same DOM, classes and ARIA
-as the DS factories, so `ds.css` styles them with no extra CSS. The app uses the DS dark theme
-throughout, and `src/styles.css` holds layout only. `main.tsx` imports `ds.css` once, before
-`styles.css`, and mounts `<DsHost />` once for the DS dialogs, toasts and tooltips. The fonts are
-relative `url()`s that Vite bundles with the build's base path, so they also load under the GitHub
-Pages sub-path. `src/ds/README.md` records the vim-html-ds commit the copy came from.
+`ds.css` and `fonts/*` (Roboto for titles, body text and numbers, and FluentUI System Icons under
+MIT), plus React components that render the same DOM, classes and ARIA as the DS factories, so
+`ds.css` styles them with no extra CSS. The app uses the DS dark theme throughout, and
+`src/styles.css` holds layout only. `main.tsx` imports `ds.css` once, before `styles.css`, and
+mounts `<DsHost />` once for the DS dialogs, toasts and tooltips. The fonts are relative `url()`s
+that Vite bundles with the build's base path, so they also load under the GitHub Pages sub-path.
+`src/ds/README.md` records the vim-html-ds commit the copy came from.
 
-To refresh it: copy `styles/ds.css` and `styles/fonts/*` from vim-html-ds again unchanged, update the
-commit hash in `src/ds/README.md`, and compare the DS factories that the React components mirror
-(`git diff <old>..<new> -- src/` in vim-html-ds) for changed markup or class names.
+The copy has one deviation from upstream: vim-html-ds still uses the commercial Retina font for
+titles, and this copy does not. The Retina `@font-face` rules and font files are removed, and
+`--font-display` is Roboto, so titles show in Roboto bold. The copy keeps this deviation until
+vim-html-ds drops Retina too.
+
+To refresh it: copy `styles/ds.css` and `styles/fonts/*` from vim-html-ds again, reapply the
+no-Retina deviation as `src/ds/README.md` describes, update the commit hash there, and compare the DS
+factories that the React components mirror (`git diff <old>..<new> -- src/` in vim-html-ds) for
+changed markup or class names.
 
 ## Tests
 
@@ -738,9 +744,6 @@ This is a sample, and it stops where a product would keep going.
 - **Elements with no UniqueId cannot be estimated** beyond their default (unassigned, included).
   Entries stored under the older `id-…` or `index-…` keys are ignored; they are not migrated or
   deleted.
-- **The Retina title font is commercial.** It comes with the vim-html-ds copy in `src/ds/fonts/`
-  and is served by the public GitHub Pages build. It will be removed from the design system later.
-  Without the `Retina-*` files, titles fall back to the system UI font (`--font-display`).
 - **No Entra end-session on sign out.** The app forgets its own tokens, but the Microsoft session in
   the browser stays, so the next sign-in is usually silent, and signing in as a different user needs
   a Microsoft sign-out.

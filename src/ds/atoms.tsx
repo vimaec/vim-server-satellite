@@ -745,7 +745,7 @@ export function TabPanel(props: TabPanelProps): JSX.Element {
 
 export type LabelProps = DataAttributes & {
   /**
-   * The DS text bands: `eyebrow` (mono caps), `title` (Retina bold), `body`,
+   * The DS text bands: `eyebrow` (mono caps), `title` (Roboto bold), `body`,
    * `dim` (small, faint), `value` (mono figures). Default: the plain label.
    */
   variant?: 'eyebrow' | 'title' | 'body' | 'dim' | 'value'
