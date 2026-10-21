@@ -154,14 +154,15 @@ resolved when the project page opens rather than cached. Omit `blobId` for the l
 pass one from `getVimHistory().history` to open an older one. A project whose `latestVim` is `null`
 has no snapshot; the picker disables it and says so.
 
-The 3D view's background is VIM navy, `#12293b` (`VIEWER_BACKGROUND` in
-`src/viewer/ViewerPane.tsx`). It goes to vim-web as the core setting `background.color`, the third
-argument of `React.Webgl.createViewer()`, and the pane under the canvas is painted with it too, so
-the colour is there before the viewer exists and before a model loads. vim-web writes that colour
-to the screen without a linear-to-sRGB step, so the `THREE.Color` is built with the hex values as
-they are (`LinearSRGBColorSpace`); `new THREE.Color('#12293b')` would be drawn almost black. Nothing
-in vim-web sets the background again, and the viewer is created with `canReadLocalStorage: false`,
-so no setting saved by its settings panel applies either.
+The 3D view's background is the DS stage colour `#0b121c` (`--stage-900`), and that is the pixel
+value on screen (`VIEWER_BACKGROUND` in `src/viewer/ViewerPane.tsx`). It goes to vim-web as the core
+setting `background.color`, the third argument of `React.Webgl.createViewer()`, and the pane under
+the canvas is painted with it too, so the colour is there before the viewer exists and before a
+model loads. vim-web writes that colour to the screen without a linear-to-sRGB step, so the
+`THREE.Color` is built with the hex values as they are (`LinearSRGBColorSpace`);
+`new THREE.Color('#0b121c')` would be drawn almost black. Nothing in vim-web sets the background
+again, and the viewer is created with `canReadLocalStorage: false`, so no setting saved by its
+settings panel applies either.
 
 ### Element identity
 

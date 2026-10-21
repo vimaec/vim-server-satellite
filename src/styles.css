@@ -193,10 +193,6 @@ h3 {
      header / form label (.ds-cols__col, .ds-formfield__label, 0.6px). */
   --en-track-eyebrow: 1px;
   --en-track-header: 0.6px;
-  /* vim-web's axes panel at the top right of the 3D view: its size and its
-     inset from the corner (vim-web's own CSS, not a DS value). */
-  --en-vimweb-axes-size: 112px;
-  --en-vimweb-axes-inset: 17px;
 }
 
 .en-side {
@@ -213,14 +209,15 @@ h3 {
   min-width: 0;
 }
 
-/* Floats over the 3D view's top right while something is selected and the
-   pane is closed (where estimate.html puts it), on the top line of vim-web's
-   axes panel and one DS gap left of it. Above the viewer, which isolates its
-   own stacking. */
+/* Floats in the 3D view's top-right corner while something is selected and
+   the pane is closed (where estimate.html puts it). The viewer has no axis
+   widget there (ViewerPane turns it off), so the button takes the corner, with
+   the same inset as the viewer status in the opposite corner. Above the
+   viewer, which isolates its own stacking. */
 .en-stage__float {
   position: absolute;
-  top: var(--en-vimweb-axes-inset);
-  right: calc(var(--en-vimweb-axes-inset) + var(--en-vimweb-axes-size) + var(--ds-space-2));
+  top: var(--ds-space-2);
+  right: var(--ds-space-2);
   z-index: 30;
 }
 

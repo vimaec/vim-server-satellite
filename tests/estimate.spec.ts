@@ -6,6 +6,7 @@
  * The tests wait on what the app reports through `window.__vimSatellite` and
  * on the mock's write log, never on a timer.
  */
+import { inflateSync } from 'node:zlib'
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import { defaultOrgs, installMockVimServer } from './support/mockVimServer'
@@ -107,6 +108,26 @@ function menuItem(page: Page, action: string): Locator {
 async function pick(page: Page, select: Locator, value: string): Promise<void> {
   await select.click()
   await page.locator(`[data-testid="select-option"][data-value="${value}"]`).click()
+}
+
+/**
+ * The colour of one screen pixel (CSS px of the viewport) as the page shows it,
+ * `rgb(r, g, b)`: a 1 × 1 screenshot, decoded here. The PNG is 8-bit RGB(A),
+ * and for a single pixel every PNG row filter leaves the bytes as they are, so
+ * the inflated data is one filter byte followed by the channels.
+ */
+async function screenPixel(page: Page, x: number, y: number): Promise<string> {
+  const png = await page.screenshot({ clip: { x: Math.round(x), y: Math.round(y), width: 1, height: 1 } })
+  const chunks: Buffer[] = []
+  for (let at = 8; at < png.length; ) {
+    const length = png.readUInt32BE(at)
+    const type = png.toString('ascii', at + 4, at + 8)
+    if (type === 'IHDR') expect(png[at + 8 + 8], 'PNG bit depth').toBe(8)
+    if (type === 'IDAT') chunks.push(png.subarray(at + 8, at + 8 + length))
+    at += 12 + length
+  }
+  const [, r, g, b] = inflateSync(Buffer.concat(chunks))
+  return `rgb(${r}, ${g}, ${b})`
 }
 
 // ---- the store ---------------------------------------------------------------------------------
@@ -924,17 +945,42 @@ test.describe('estimate', () => {
     await expect(note).toHaveValue('checked')
   })
 
-  test('the 3D view is VIM navy before and after the model loads', async ({ page }) => {
+  test('the 3D view is #0b121c on screen before and after the model loads', async ({ page }) => {
     await installMockVimServer(page)
     await useFakeSession(page)
     await page.goto('/?project=p-tiny')
     const pane = page.getByTestId('viewer-pane')
     // The pane carries the colour, so it shows before the viewer draws anything.
-    await expect(pane).toHaveCSS('background-color', 'rgb(18, 41, 59)')
+    await expect(pane).toHaveCSS('background-color', 'rgb(11, 18, 28)')
     await waitForEstimate(page)
     // And vim-web's renderer clears to it, with the model in view.
-    expect(await page.evaluate(() => window.__vimSatellite?.getViewerBackground())).toBe('#12293b')
-    await expect(pane).toHaveCSS('background-color', 'rgb(18, 41, 59)')
+    expect(await page.evaluate(() => window.__vimSatellite?.getViewerBackground())).toBe('#0b121c')
+    await expect(pane).toHaveCSS('background-color', 'rgb(11, 18, 28)')
+    // The setting alone does not prove the colour: vim-web could still convert it on the way to
+    // the screen. The canvas's bottom-left corner, left of the control bar and clear of the
+    // framed model, is background only.
+    const box = await pane.boundingBox()
+    if (!box) throw new Error('The viewer pane has no box')
+    await expect.poll(() => screenPixel(page, box.x + 8, box.y + box.height - 8)).toBe('rgb(11, 18, 28)')
+  })
+
+  test('the 3D view has no axis widget, and Cost Details takes its corner', async ({ page }) => {
+    await openEstimate(page)
+    // vim-web renders its axes panel (.vim-axes-panel, or .vim-axes-panel-empty without its
+    // camera buttons) and tags the gizmo canvas .vim-axes-canvas only when panelAxes is on.
+    await expect(page.locator('.vim-axes-panel, .vim-axes-panel-empty, .vim-axes-canvas')).toHaveCount(0)
+    // The control bar stays.
+    await expect(page.locator('.vim-control-bar')).toBeVisible()
+
+    await selectElement(page, WALL)
+    const button = page.getByTestId('cost-details-open')
+    await expect(button).toBeVisible()
+    const pane = await page.getByTestId('viewer-pane').boundingBox()
+    const corner = await button.boundingBox()
+    if (!pane || !corner) throw new Error('The viewer pane or the Cost Details button has no box')
+    // One DS step (--ds-space-2, 8 px) in from the pane's top and right edges.
+    expect(Math.round(corner.y - pane.y)).toBe(8)
+    expect(Math.round(pane.x + pane.width - (corner.x + corner.width))).toBe(8)
   })
 
   test('Cost Details steps through the selection without changing it', async ({ page }) => {

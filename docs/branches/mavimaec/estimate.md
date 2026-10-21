@@ -14,7 +14,8 @@
 - Remove the label feature (palette and colored labels).
 - Keep per-user view settings (active sheet, grouping, display mode) in browser localStorage; only the shared estimate data goes to VIM Server.
 - Add a "refresh" button next to the "Estimate" title that reloads the cost and estimation data from VIM Server.
-- Set the background color of the vim-web viewer to #12293b.
+- Set the background color of the vim-web viewer to #0b121c.
+- Disable the axis widget in the top right of the 3D view.
 
 ## Questions
 
@@ -68,7 +69,8 @@
 - [ ] Check the look: dark VIM design system fonts and colors on sign-in, project picker and project pages
 - [ ] Change a cost code price in a second browser, then click the refresh button next to "Estimate"; the new price and TOTAL show without a page reload
 - [ ] Click refresh while you type a note; the note is kept after the refresh
-- [ ] The 3D view background is navy (#12293b), before and after the model loads
+- [ ] The 3D view background is #0b121c (sample it with a color picker), before and after the model loads
+- [ ] The axis widget does not show in the top right of the 3D view; the "Cost Details" button sits in the top-right corner
 - [ ] Open "Medical Tower Project", select "MEP Estimate Sheet"; only MEP elements show in 3D, grouped by the six MasterFormat work packages, TOTAL about $47.1M (direct about $34.4M)
 
 ## General Notes
@@ -85,6 +87,6 @@
 - Keep view settings (active sheet, grouping, display, language) per user in the browser
 - Allow edits only for the Manager and Admin project roles; Viewers see a read-only estimate
 - Add a refresh button next to the "Estimate" title that reloads the estimate data from VIM Server without losing edits in progress
-- Set the 3D viewer background to #12293b
+- Set the 3D viewer background to #0b121c and hide the axis widget
 - Restyle the app with a copy of the vim-html-ds design system (stylesheet, fonts, React components)
 - Replace the label end-to-end tests with estimate tests, and rewrite the README for the Estimate sample

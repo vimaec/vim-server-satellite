@@ -16,18 +16,19 @@ type IWebglVim = VIM.Core.Webgl.IWebglVim
 type IWebglLoadRequest = VIM.Core.Webgl.IWebglLoadRequest
 
 /**
- * The 3D view's background (VIM navy). It is vim-web's renderer clear colour,
- * set once at creation (core setting `background.color`); nothing in vim-web
- * sets it again, and its settings panel neither shows nor stores it. The pane
- * is painted with it too, so the view has it before the viewer exists.
+ * The 3D view's background, the DS stage colour (`--stage-900`), as it must
+ * appear on screen. It is vim-web's renderer clear colour, set once at creation
+ * (core setting `background.color`); nothing in vim-web sets it again, and its
+ * settings panel neither shows nor stores it. The pane is painted with it too,
+ * so the view has it before the viewer exists.
  */
-const VIEWER_BACKGROUND = '#12293b'
+const VIEWER_BACKGROUND = '#0b121c'
 
 /**
  * VIEWER_BACKGROUND for the renderer. vim-web writes the background to the
  * screen as it holds it, with no linear-to-sRGB step, so the colour is given
  * with its sRGB values as they are (as vim-web's own default is). Parsed as
- * sRGB, `new Color('#12293b')`, it would be converted to linear and drawn
+ * sRGB, `new Color('#0b121c')`, it would be converted to linear and drawn
  * almost black.
  */
 function rendererBackground(): VIM.THREE.Color {
@@ -210,9 +211,17 @@ export function ViewerPane({
       host,
       {
         // The app draws its own tree and estimate panel, so the built-in panels
-        // are off. Local storage is off too: a persisted setting from the built-in
-        // settings panel would otherwise override what is passed here.
-        ui: { panelBimTree: false, panelBimInfo: false, miscProjectInspector: false },
+        // are off. The axis widget (axes gizmo and its camera buttons, top
+        // right) is off too: that corner is the Cost Details button's, and the
+        // control bar still frames the scene and the selection. Local storage
+        // is off as well: a persisted setting from the built-in settings panel
+        // would otherwise override what is passed here.
+        ui: {
+          panelBimTree: false,
+          panelBimInfo: false,
+          panelAxes: false,
+          miscProjectInspector: false,
+        },
         isolation: { autoIsolate: false },
         capacity: { canReadLocalStorage: false },
       },
