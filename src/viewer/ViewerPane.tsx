@@ -3,9 +3,9 @@
  *
  * The viewer is expensive (a WebGL context, its own React UI) so it is created
  * once, lives for as long as the project page, and is handed new work through
- * props: a `source` to load, a controlled `selection`, and a map of color
- * overrides. Everything the user does in the 3D view leaves through
- * `onSelectionChanged`.
+ * props: a `source` to load, a controlled `selection`, a map of color
+ * overrides and the set of hidden elements. Everything the user does in the 3D
+ * view leaves through `onSelectionChanged` and `onContextMenu`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as VIM from 'vim-web'
@@ -31,14 +31,28 @@ export type ViewerPaneProps = {
   selection: number[]
   /** Element index -> `#rrggbb`. Elements not listed get their model color back. */
   colors: Map<number, string>
+  /** Element indices to hide in 3D (the estimate's excluded elements). The others are shown. */
+  hidden: Set<number>
   onVimLoaded: (vim: IWebglVim | undefined) => void
   onSelectionChanged: (indices: number[]) => void
   onStatus: (status: ViewerStatus) => void
   /**
-   * Filled in with a "fit the camera to the selection" function, so the element
-   * tree's Frame button can drive the camera without owning the viewer.
+   * Filled in with a "fit the camera to the selection" function, so a button
+   * outside the viewer can drive the camera without owning the viewer.
    */
   frameRef?: { current: (() => void) | null }
+  /**
+   * Filled in with a "fit the camera to these elements" function, for the Cost
+   * Details camera toggle: it frames the element it shows, which is not
+   * necessarily the whole selection.
+   */
+  frameElementsRef?: { current: ((indices: number[]) => void) | null }
+  /**
+   * A right-click (not a right-drag, which turns the camera) in the 3D view, at
+   * this viewport position. The page opens its own menu there; vim-web's menu
+   * is switched off, and the selection does not change.
+   */
+  onContextMenu?: (x: number, y: number) => void
 }
 
 const STATUS_TEXT: Record<ViewerStatus, string> = {
@@ -65,16 +79,67 @@ function sameIndices(a: number[], b: number[]): boolean {
   return b.every((index) => set.has(index))
 }
 
+/**
+ * Sends a right-click in the 3D view to `open` (viewport coordinates) instead
+ * of vim-web's own menu, which has no setting to turn it off. Returns the undo.
+ *
+ * vim-web tells a click from a drag on pointer-up; the browser's `contextmenu`
+ * event comes before that on macOS / Linux and after it on Windows. A menu
+ * opened before that event would catch it on its backdrop and close at once,
+ * so the menu opens on whichever of the two comes second. The browser's own
+ * menu is always suppressed over the 3D view.
+ */
+function routeContextMenu(
+  viewer: ViewerApi,
+  host: HTMLElement,
+  open: (x: number, y: number) => void,
+): () => void {
+  /** When the browser last fired `contextmenu` over the viewer. */
+  let nativeAt = -Infinity
+  let pending: { x: number; y: number } | null = null
+  let timer = 0
+  const flush = (): void => {
+    window.clearTimeout(timer)
+    const at = pending
+    pending = null
+    if (at) open(at.x, at.y)
+  }
+  const onNative = (event: MouseEvent): void => {
+    event.preventDefault()
+    nativeAt = performance.now()
+    if (pending) flush()
+  }
+  host.addEventListener('contextmenu', onNative)
+  const restore = viewer.core.inputs.mouse.override({
+    // vim-web's own handler (`original`) shows its menu: it is never called.
+    onContextMenu: (_original, pos) => {
+      const rect = viewer.core.viewport.canvas.getBoundingClientRect()
+      pending = { x: rect.left + pos.x * rect.width, y: rect.top + pos.y * rect.height }
+      if (performance.now() - nativeAt < 1000) flush()
+      // No contextmenu event on its way (it can be swallowed): open anyway.
+      else timer = window.setTimeout(flush, 300)
+    },
+  })
+  return () => {
+    window.clearTimeout(timer)
+    host.removeEventListener('contextmenu', onNative)
+    restore()
+  }
+}
+
 export function ViewerPane({
   source,
   resolving,
   sourceError,
   selection,
   colors,
+  hidden,
   onVimLoaded,
   onSelectionChanged,
   onStatus,
   frameRef,
+  frameElementsRef,
+  onContextMenu,
 }: ViewerPaneProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<ViewerApi | undefined>(undefined)
@@ -92,22 +157,24 @@ export function ViewerPane({
   const applyingSelfRef = useRef(false)
   /**
    * The color this pane last gave each element index. Assigning `element.color`
-   * walks that element's meshes, so a changed label must not repaint the other
+   * walks that element's meshes, so a changed color must not repaint the other
    * thousands of elements that did not move.
    */
   const coloredRef = useRef<Map<number, string>>(new Map())
+  /** What this pane last hid, for the same reason: only the elements that changed are touched. */
+  const hiddenRef = useRef<Set<number>>(new Set())
 
   const [status, setStatus] = useState<ViewerStatus>('idle')
   const [loadError, setLoadError] = useState('')
-  /** Bumped on every load so the color and selection effects rerun for the new vim. */
+  /** Bumped on every load so the color, visibility and selection effects rerun for the new vim. */
   const [vimEpoch, setVimEpoch] = useState(0)
 
-  // The viewer outlives every prop, so its subscription reads the newest
+  // The viewer outlives every prop, so its subscriptions read the newest
   // handlers from a ref instead of the ones captured when it was created.
-  const handlers = useRef({ onVimLoaded, onSelectionChanged })
+  const handlers = useRef({ onVimLoaded, onSelectionChanged, onContextMenu })
   useEffect(() => {
-    handlers.current = { onVimLoaded, onSelectionChanged }
-  }, [onVimLoaded, onSelectionChanged])
+    handlers.current = { onVimLoaded, onSelectionChanged, onContextMenu }
+  }, [onVimLoaded, onSelectionChanged, onContextMenu])
 
   const shownStatus: ViewerStatus = sourceError ? 'error' : resolving ? 'loading' : status
   useEffect(() => onStatus(shownStatus), [onStatus, shownStatus])
@@ -118,8 +185,8 @@ export function ViewerPane({
     if (!host) return undefined
 
     const viewer = await VIM.React.Webgl.createViewer(host, {
-      // The app draws its own tree and label panel, so the built-in panels are
-      // off. Local storage is off too: a persisted setting from the built-in
+      // The app draws its own tree and estimate panel, so the built-in panels
+      // are off. Local storage is off too: a persisted setting from the built-in
       // settings panel would otherwise override what is passed here.
       ui: { panelBimTree: false, panelBimInfo: false, miscProjectInspector: false },
       isolation: { autoIsolate: false },
@@ -132,11 +199,17 @@ export function ViewerPane({
     }
     viewerRef.current = viewer
 
-    const selectionApi = viewer.core.selection
-    unsubRef.current = selectionApi.onSelectionChanged.sub(() => {
+    const unsubSelection = viewer.core.selection.onSelectionChanged.sub(() => {
       if (applyingSelfRef.current) return
       handlers.current.onSelectionChanged(selectedIndices(viewer))
     })
+    const unsubMenu = routeContextMenu(viewer, hostRef.current, (x, y) =>
+      handlers.current.onContextMenu?.(x, y),
+    )
+    unsubRef.current = () => {
+      unsubSelection()
+      unsubMenu()
+    }
 
     return viewer
   }, [])
@@ -147,6 +220,7 @@ export function ViewerPane({
     if (viewer) for (const vim of [...viewer.core.vims]) viewer.unload(vim)
     vimRef.current = undefined
     coloredRef.current = new Map()
+    hiddenRef.current = new Set()
     handlers.current.onVimLoaded(undefined)
   }, [])
 
@@ -174,7 +248,7 @@ export function ViewerPane({
         unloadAll()
 
         // prewarmBim caches the BIM parameter columns in the background, which
-        // is what the element tree reads right after this.
+        // is what the estimate's quantities read right after this.
         const request = viewer.load({ url: source.url }, { prewarmBim: true })
         requestRef.current = request
         const result = await request.getResult()
@@ -191,6 +265,7 @@ export function ViewerPane({
         }
         vimRef.current = result.vim
         coloredRef.current = new Map()
+        hiddenRef.current = new Set()
         setVimEpoch((epoch) => epoch + 1)
         handlers.current.onVimLoaded(result.vim)
         setStatus('loaded')
@@ -232,10 +307,10 @@ export function ViewerPane({
     }
   }, [selection, vimEpoch])
 
-  // Apply the label colors, one element at a time and only where they changed:
-  // what entered the map, what left it, and what kept its index but changed
-  // color. An element that is no longer labelled is reset to undefined, which
-  // puts its model color back. No re-render call is needed.
+  // Apply the colors, one element at a time and only where they changed: what
+  // entered the map, what left it, and what kept its index but changed color.
+  // An element that left the map is reset to undefined, which puts its model
+  // color back. No re-render call is needed.
   useEffect(() => {
     const vim = vimRef.current
     if (!vim) return
@@ -254,7 +329,26 @@ export function ViewerPane({
     coloredRef.current = new Map(colors)
   }, [colors, vimEpoch])
 
-  // Hand the Frame button a way to move the camera.
+  // Hide the excluded elements, touching only those whose state changed (as the
+  // colors above): including one element must not walk the whole model.
+  useEffect(() => {
+    const vim = vimRef.current
+    if (!vim) return
+    const previous = hiddenRef.current
+    for (const index of hidden) {
+      if (previous.has(index)) continue
+      const element = vim.getElementFromIndex(index)
+      if (element) element.visible = false
+    }
+    for (const index of previous) {
+      if (hidden.has(index)) continue
+      const element = vim.getElementFromIndex(index)
+      if (element) element.visible = true
+    }
+    hiddenRef.current = new Set(hidden)
+  }, [hidden, vimEpoch])
+
+  // Hand the page a way to frame the selection.
   useEffect(() => {
     if (!frameRef) return
     frameRef.current = () => {
@@ -267,6 +361,35 @@ export function ViewerPane({
       frameRef.current = null
     }
   }, [frameRef])
+
+  // Hand Cost Details a way to frame any elements, selected or not.
+  useEffect(() => {
+    if (!frameElementsRef) return
+    frameElementsRef.current = (indices) => {
+      const viewer = viewerRef.current
+      const vim = vimRef.current
+      if (!viewer || !vim) return
+      const elements = indices
+        .map((index) => vim.getElementFromIndex(index))
+        .filter((element): element is NonNullable<typeof element> => element !== undefined)
+      if (elements.length === 0) return
+      if (elements.length === 1) {
+        void viewer.core.camera.lerp(1).frame(elements[0])
+        return
+      }
+      void (async () => {
+        const box = new VIM.THREE.Box3()
+        for (const element of elements) {
+          const part = await element.getBoundingBox()
+          if (part) box.union(part)
+        }
+        if (!box.isEmpty()) await viewer.core.camera.lerp(1).frame(box)
+      })()
+    }
+    return () => {
+      frameElementsRef.current = null
+    }
+  }, [frameElementsRef])
 
   // Dispose on unmount only: the viewer is deliberately long-lived.
   useEffect(

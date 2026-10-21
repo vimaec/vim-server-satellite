@@ -27,6 +27,8 @@ export const ICON_GLYPHS = {
   lock: '', // lock_closed_16_regular
   unlock: '', // lock_open_16_regular
   'chevron-down-glyph': '', // chevron_down_12_regular
+  // delete_16_regular: a trash can. Not in the DS map; the Estimate workflow's markup rows use it.
+  trash: '',
 } as const
 
 export type IconGlyphName = keyof typeof ICON_GLYPHS
@@ -71,6 +73,14 @@ export const SVG_PATHS = {
   'views-one': { d: 'M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0z' },
   // Three bars: the "configure / more" trigger.
   menu: { d: 'M3 6h18v2H3zM3 11h18v2H3zM3 16h18v2H3z' },
+  // A camera body with its lens knocked out (evenodd): "frame it in the 3D view".
+  // Added for the estimate's Cost Details pane; vim-html-ds draws it as a glyph of the host font.
+  camera: {
+    evenodd: true,
+    d:
+      'M9 4 7.17 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.17L15 4H9z' +
+      'M12 8.5a4.5 4.5 0 1 0 0 9a4.5 4.5 0 1 0 0-9z',
+  },
 } as const satisfies Record<string, { d: string; evenodd?: boolean }>
 
 export type SvgIconName = keyof typeof SVG_PATHS

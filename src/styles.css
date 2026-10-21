@@ -171,275 +171,700 @@ h3 {
   display: none;
 }
 
-/* === Legacy: element tree + label panel ===================================
-   These rules serve src/tree and src/labels, which the Estimate port removes;
-   they go with them. The old light-theme names now point at DS tokens, and the
-   bare element rules are scoped to the side pane with :where() (zero
-   specificity) so they cannot reach the DS controls anywhere else. */
+/* === Estimate =============================================================
+   The workspace is [ estimate panel | 3D viewer | Cost Details ], with DS split
+   handles between them. The panel's rules are estimate.html's .en-* / .ed-*
+   layout, on DS tokens. */
 
-.side-pane {
-  --bg: var(--stage-800);
-  --surface: var(--stage-900);
-  --border: var(--hairline);
-  --text: var(--text-100);
-  --muted: var(--text-400);
-  --accent: var(--vim-cyan-700);
-  --error: var(--bad);
-  --radius: var(--ds-radius-btn);
+:root {
+  /* The upper end of the Costs colours in 3D (data, not UI, as estimate.html):
+     orange at the 90th percentile, red at the top. pricing.ts costRamp() reads them. */
+  --en-cost-warm: #ee8a2e;
+  --en-cost-hot: #e2483d;
+  /* One tree row, and the inline controls drawn to fit in it. */
+  --en-row-h: 26px;
+  --en-cell-h: 20px;
 }
 
-:where(.side-pane) h2 {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0 0 6px;
-}
-
-:where(.side-pane) p {
-  margin: 0 0 10px;
-}
-
-.muted {
-  color: var(--muted);
-}
-
-.small {
-  font-size: 12px;
-}
-
-:where(.side-pane) button {
-  font: inherit;
-  color: inherit;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  cursor: pointer;
-}
-
-:where(.side-pane button:hover:not(:disabled)) {
-  border-color: var(--hairline-soft);
-}
-
-:where(.side-pane button:disabled) {
-  cursor: default;
-  opacity: 0.55;
-}
-
-:where(.side-pane) input {
-  font: inherit;
-  color: inherit;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-/* The side pane is a column: the tree takes the space that is left, the label
-   panel keeps its place at the bottom. Each scrolls on its own. */
-.side-pane {
-  display: flex;
-  flex: 0 0 340px;
-  flex-direction: column;
-  min-height: 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-}
-
-/* --- element tree ------------------------------------------------------- */
-
-.tree {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.tree-toolbar {
+.en-side {
   display: flex;
   flex: 0 0 auto;
-  gap: 6px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  min-height: 0;
 }
 
-.tree-toolbar input {
-  flex: 1;
+.en-stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.tree-rows {
-  flex: 1;
+/* Floats over the 3D view's top right while something is selected and the
+   pane is closed (where estimate.html puts it), on the top line of vim-web's
+   axes panel and just left of it (that panel is 112px wide, 17px from the
+   corner). Above the viewer, which isolates its own stacking. */
+.en-stage__float {
+  position: absolute;
+  top: 17px;
+  right: calc(17px + 112px + var(--ds-space-2));
+  z-index: 30;
+}
+
+.en-details {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* --- the panel ---------------------------------------------------------- */
+
+/* The head's language switch keeps its size in a narrow panel. */
+.en-panel .ds-panel__actions,
+.en-panel .ds-panel__actions > * {
+  flex: 0 0 auto;
+}
+
+/* The body is a column that does not scroll itself: the trees inside do.
+   Its sides keep the panel padding; the tab strip sits right under the head. */
+.en-panel > .ds-panel__body.en-body {
+  gap: 0;
+  padding: 0 var(--ds-space-3);
+  overflow: hidden;
+}
+
+.en-body > * {
+  flex: none;
+}
+
+.en-body > .ds-tabpanel.ds-open {
+  flex: 1 1 auto;
+  gap: 0;
+  min-height: 0;
+}
+
+.en-body > .ds-empty-fill {
+  flex: 1 1 auto;
+}
+
+.en-state,
+.en-readonly {
+  margin-top: var(--ds-space-3);
+}
+
+.en-tabs .ds-tab {
+  font-size: var(--ds-fs-value);
+}
+
+/* The foot is the footer's own box (it pads itself and wraps). */
+.en-panel > .ds-panel__foot {
+  display: block;
+  padding: 0;
+}
+
+.en-eyebrow {
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* --- Elements tab chrome ------------------------------------------------ */
+
+/* A row label sits on the line of its row's FIRST control line, also when a
+   narrow panel wraps the controls onto two lines. */
+.en-chrome > .en-eyebrow {
+  line-height: var(--ds-control-h);
+}
+
+/* Labels in one column, controls in the other: every control row starts on
+   the same line, in any language. */
+.en-chrome {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--ds-space-2) var(--ds-space-3);
+  align-items: start;
+  padding: var(--ds-space-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.en-line,
+.en-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  align-items: center;
+  min-width: 0;
+  min-height: var(--ds-control-h);
+}
+
+.en-line__end {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: center;
+  margin-left: auto;
+}
+
+.en-sheet {
+  flex: 0 1 240px;
+  min-width: 160px;
+}
+
+.en-currency {
+  min-width: 112px;
+}
+
+.en-strip {
+  flex-wrap: nowrap;
+}
+
+.en-strip__chips {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1);
+  align-items: center;
+  min-width: 0;
+}
+
+.en-strip__step {
+  display: inline-flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+}
+
+.en-strip__sep,
+.en-strip__leaf {
+  color: var(--text-400);
+  font-size: var(--ds-fs-label);
+}
+
+.en-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-2);
+  border: 1px solid var(--hairline);
+  background: var(--stage-800);
+}
+
+.en-drawer__row {
+  display: flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+  min-height: var(--ds-control-h-sm);
+}
+
+.en-drawer__num {
+  width: 16px;
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  text-align: right;
+}
+
+.en-drawer__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: var(--ds-space-1);
+  color: var(--text-200);
+  font-size: var(--ds-fs-label);
+}
+
+.en-drawer__foot {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: center;
+  margin-top: var(--ds-space-1);
+  padding-top: var(--ds-space-2);
+  border-top: 1px solid var(--hairline);
+}
+
+/* The cost range while Display is Costs: lowest, the ramp, highest. */
+.en-legend {
+  display: inline-flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+  color: var(--text-300);
+  font-size: var(--ds-fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.en-legend__bar {
+  width: 72px;
+  height: 8px;
+  border-radius: var(--ds-radius-btn);
+}
+
+.en-searchrow,
+.en-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  align-items: center;
+  padding: var(--ds-space-2) 0;
+}
+
+.en-tools {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.en-searchrow > .ds-search {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.en-steps {
+  display: flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+}
+
+.en-push {
+  margin-left: auto;
+}
+
+.en-spacer {
+  flex: 1 1 auto;
+}
+
+/* --- the trees (VirtualTree) -------------------------------------------- */
+
+.en-treewrap {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 160px;
+  margin-bottom: var(--ds-space-3);
+}
+
+/* The scroll box: header and rows scroll together, both ways. */
+.en-vt {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  padding: 6px 10px 10px;
-  font-size: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--stage-900);
 }
 
-.tree-indent {
-  margin-left: 12px;
+.en-vt__canvas {
+  position: relative;
 }
 
-.tree-group {
+.en-vt__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--hairline-soft);
+  background: var(--stage-800);
+}
+
+.en-vt__body {
+  position: relative;
+}
+
+.en-vt__rows {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+}
+
+/* A row: the DS tree item at a fixed height. The depth indent is the toggle's
+   (DS interactive trees), so the row itself has no left padding. */
+.en-row.ds-tree__item {
+  box-sizing: border-box;
+  height: var(--en-row-h);
+  padding: 0 var(--ds-col-pad) 0 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-100) 3%, transparent);
+}
+
+.en-row--head.ds-tree__item {
+  border-bottom: 0;
+  cursor: default;
+}
+
+.en-row--head.ds-tree__item:hover {
+  background: transparent;
+}
+
+/* The lead: the include box and the name column (toggle, swatch, label). Its
+   minimum width (set per tree) is what makes a narrow panel scroll sideways
+   instead of crushing it, and it stays pinned at the left while the value
+   columns scroll under it. Opaque, so the scrolled cells do not show through;
+   the row's state tint is repeated on it (::before, under its content). */
+.en-lead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex: 1 0 var(--en-lead-min, 220px);
+  gap: var(--ds-tree-gap);
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  background: var(--stage-900);
+}
+
+.en-lead::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--en-tint, transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.en-row.ds-rowtint {
+  --en-tint: color-mix(in srgb, var(--ds-rowtint) var(--ds-rowtint-a, 12%), transparent);
+}
+
+.en-row:hover,
+.en-row.ds-sel {
+  --en-tint: var(--vim-cyan-tint);
+}
+
+.en-row.ds-sel > .en-lead {
+  box-shadow: inset 2px 0 0 var(--vim-cyan);
+}
+
+.en-row--head > .en-lead {
+  --en-tint: transparent;
+  background: var(--stage-800);
+}
+
+.en-name {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Header labels: the DS column-header face. */
+.en-th {
+  overflow: hidden;
+  color: var(--text-300);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: 0.6px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The NAME label sits over a depth-0 row's label: the toggle's padding (14)
+   + the caret (5) + its margin (7). */
+.en-name.en-th {
+  display: block;
+  align-self: center;
+  padding-left: 26px;
+}
+
+.en-c-count { width: var(--en-c-count); }
+.en-c-amount { width: var(--en-c-amount); }
+.en-c-qty { width: var(--en-c-qty); }
+.en-c-wp { width: var(--en-c-wp); }
+.en-c-code { width: var(--en-c-code); }
+.en-c-extra { width: var(--en-c-extra); }
+.en-c-note { width: var(--en-c-note); }
+.en-c-basis { width: var(--en-c-basis); }
+.en-c-unit { width: var(--en-c-unit); }
+.en-c-price { width: var(--en-c-price); }
+.en-c-days { width: var(--en-c-days); }
+.en-c-rate { width: var(--en-c-rate); }
+.en-c-mat { width: var(--en-c-mat); }
+.en-c-lab { width: var(--en-c-lab); }
+
+/* A cell that holds a control: the control fills it; the DS column inset
+   stays on the right, as for the figures. */
+.en-ctl.ds-tree__cell {
   display: flex;
   align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 3px;
-  background: none;
+  overflow: visible;
   text-align: left;
 }
 
-.tree-group:hover {
-  background: var(--bg);
-}
-
-.tree-name {
+.en-th.en-ctl {
+  display: block;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.chevron {
-  flex: 0 0 12px;
-  color: var(--muted);
-}
-
-[data-testid='tree-element'] {
-  cursor: pointer;
-  border-radius: 3px;
-}
-
-[data-testid='tree-element']:hover {
-  background: var(--bg);
-}
-
-[data-testid='tree-element'][aria-selected='true'] {
-  color: #fff;
-  background: var(--accent);
-}
-
-.tree-leaf {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 4px 2px 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tree-element-label {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border: 1px solid rgb(0 0 0 / 25%);
-  border-radius: 50%;
-}
-
-/* --- label panel -------------------------------------------------------- */
-
-.label-panel {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 48%;
-  padding: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.label-list,
-.labelled-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.label-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.label-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.label-item button {
-  padding: 2px 8px;
-  font-size: 12px;
-}
-
-button.icon {
-  padding: 2px 7px;
-  line-height: 1;
-}
-
-.swatch {
-  flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-  border: 1px solid rgb(0 0 0 / 25%);
-  border-radius: 3px;
-}
-
-.small-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.label-new {
-  display: flex;
-  gap: 6px;
-}
-
-.label-new input[type='text'] {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-}
-
-.label-new input[type='color'] {
-  width: 32px;
-  padding: 1px;
-}
-
-.label-status {
-  margin: 0;
-  color: var(--muted);
-}
-
-.label-status[data-state='error'] {
-  color: var(--error);
-}
-
-.label-panel p {
-  margin: 0;
-}
-
-/* The labelled list is the only part that grows, so it gets the scroll. */
-.labelled-list {
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-  font-size: 12px;
-}
-
-.labelled-element {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+/* Inline selects and fields in a row: one height, so a row's controls line up. */
+.en-row .ds-select--inline,
+.en-row .ds-input--inline {
+  box-sizing: border-box;
   width: 100%;
+  min-width: 0;
+  height: var(--en-cell-h);
+  padding: 0;
+  font-size: var(--ds-fs-label);
+}
+
+.en-row .ds-select--inline .ds-select__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* The trigger is a <button>, which centres its text. */
+  text-align: left;
+}
+
+.en-cellnum {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The ElementId before an element's name. */
+.en-eid {
+  margin-right: var(--ds-space-2);
+  color: var(--text-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.en-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The tree's own empty state sits where the rows would be, inside the tree's
+   frame (no second, dashed one). */
+.en-vt .ds-empty {
+  padding: var(--ds-space-5) var(--ds-space-3);
+  border: 0;
+}
+
+/* --- dialogs ------------------------------------------------------------ */
+
+.en-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+
+.en-picklist {
+  height: 320px;
+}
+
+.en-picklist--short {
+  height: 160px;
+}
+
+/* A two-column form: the grid spaces the rows, so the fields' own "+ field"
+   top margin goes. */
+.en-form2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ds-space-3);
+  align-items: start;
+}
+
+.en-form2 > .ds-formfield {
+  margin-top: 0;
+}
+
+.en-form2__wide {
+  grid-column: 1 / -1;
+}
+
+/* --- footer: [ markups | TOTAL ] ---------------------------------------- */
+
+.en-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-4);
+  align-items: flex-start;
+  padding: var(--ds-space-3);
+  background: var(--stage-800);
+}
+
+.en-markups {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  min-width: 0;
+}
+
+.en-mrow {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) 96px 100px var(--ds-control-h-sm);
+  gap: var(--ds-space-2);
+  align-items: center;
+}
+
+.en-mrow--head {
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.en-mrow .ds-number {
+  width: 100%;
+}
+
+.en-mrow .ds-number__input {
+  flex: 1 1 auto;
+  width: 0;
+  text-align: right;
+}
+
+.en-num {
+  color: var(--text-100);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.en-mrow--head > .en-num {
+  color: var(--text-400);
+}
+
+.en-total {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.en-total__label {
+  color: var(--vim-cyan);
+  font-size: var(--ds-fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* The DS gold (the control bar's gold glow uses it too). */
+.en-total__value {
+  color: var(--health-amber);
+  font-size: var(--ds-fs-hero);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.en-total__sub {
+  color: var(--text-300);
+  font-size: var(--ds-fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.en-total__sub--warn {
+  color: var(--warn);
+}
+
+/* --- Cost Details ------------------------------------------------------- */
+
+.ed-pager {
+  display: flex;
+  flex: none;
+  gap: var(--ds-space-1);
+  align-items: center;
+  padding-bottom: var(--ds-space-2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ed-pagesel {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ed-facts,
+.ed-cost,
+.ed-fields {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+.ed-cost,
+.ed-fields {
+  padding-top: var(--ds-space-2);
+  border-top: 1px solid var(--hairline);
+}
+
+.ed-fields {
+  gap: var(--ds-space-2);
+}
+
+.ed-head {
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.ed-line {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.ed-fields .ed-line {
+  align-items: center;
+}
+
+.ed-k {
+  flex: 0 0 104px;
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.ed-v {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
+  color: var(--text-100);
+  font-size: var(--ds-fs-label);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ed-v--num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ed-v--total {
+  color: var(--health-amber);
+  font-weight: 600;
+}
+
+.ed-varies {
+  color: var(--text-400);
+  font-style: italic;
+}
+
+.ed-warn {
+  color: var(--warn);
+  font-size: var(--ds-fs-label);
+}
+
+.ed-control {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ed-note {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+/* In this column the label's 104px basis would be its HEIGHT: it keeps its own. */
+.ed-note > .ed-k {
+  flex: 0 0 auto;
 }

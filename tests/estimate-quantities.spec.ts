@@ -40,7 +40,9 @@ async function fixtureFacts(): Promise<Map<number, ElementFacts>> {
 
 test('the fixture: quantities in metric, names from the BIM tables', async () => {
   const facts = await fixtureFacts()
-  expect(facts.size).toBe(25)
+  // 25 elements have a node; the saved 3D view (category Cameras) is not estimated.
+  expect(facts.size).toBe(24)
+  expect([...facts.values()].some((entry) => entry.category === 'Cameras')).toBe(false)
 
   // A wall: Revit's own Length / Area / Volume (feet), converted.
   const wall = facts.get(51)!

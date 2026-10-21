@@ -36,6 +36,9 @@ const FT = 0.3048
 const FT2 = 0.09290304
 const FT3 = 0.028316846592
 
+/** The Revit category of saved views and cameras: never part of an estimate. */
+const EXCLUDED_CATEGORY = 'Cameras'
+
 const KIND_NONE = 0
 const KIND_LENGTH = 1
 const KIND_AREA = 2
@@ -230,6 +233,11 @@ export async function readFacts(
   const facts = new Map<number, ElementFacts>()
   for (const element of scope) {
     const i = element.index
+    const category = at(categoryName, at(elementCategory, i)) ?? ''
+    // A saved 3D view ("VIM Custom View") carries geometry, but it is not a
+    // thing anyone builds or prices: the original workflow's Physical-Visible
+    // domain leaves cameras out, so the estimate does too.
+    if (category === EXCLUDED_CATEGORY) continue
     const length = positive(lengthFt[i] || 0)
     const area = positive(areaFt[i] || 0) ?? positive(materialAreaFt[i] || 0)
     const volume = positive(volumeFt[i] || 0) ?? positive(materialVolumeFt[i] || 0)
@@ -238,7 +246,7 @@ export async function readFacts(
       key: elementKey(element),
       elementId: element.elementId,
       name: at(elementName, i) ?? '',
-      category: at(categoryName, at(elementCategory, i)) ?? '',
+      category,
       family: at(elementFamily, i) ?? '',
       type: typeName.get(i) ?? '',
       level: at(elementName, at(levelElement, at(elementLevel, i))) ?? '',

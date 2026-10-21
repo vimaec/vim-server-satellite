@@ -13,8 +13,8 @@ export function SignInPage(): JSX.Element {
     <main className="centered" data-testid="signin-page">
       <Card className="signin-card" title="VIM Server Satellite" titleAs="h1">
         <Label as="p" variant="body">
-          A sample app that opens a VIM Server project, shows its model and stores labels back on
-          the project.
+          A sample app that opens a VIM Server project, shows its model, and keeps a cost estimate of
+          its elements in the project's data store.
         </Label>
 
         <Button variant="primary" data-testid="signin-microsoft" onClick={auth.signIn}>
