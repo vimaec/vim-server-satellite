@@ -64,6 +64,15 @@ export type RecordedWrite =
   | { kind: 'put-batch'; namespace: string; entries: { key: string; value: unknown }[] }
   | { kind: 'delete'; namespace: string; keys: string[] }
 
+/** A data-store write as `failWrite` sees it, before the mock acts on it. */
+export type PendingWrite = {
+  /** `put` / `delete` one entry, `put-batch` / `delete-batch` many, `delete-namespace` all of them. */
+  kind: 'put' | 'delete' | 'put-batch' | 'delete-batch' | 'delete-namespace'
+  namespace: string
+  /** The entry key, for `put` and `delete`. */
+  key?: string
+}
+
 export type MockOptions = {
   orgs?: MockOrg[]
   /** Seed the project data store: namespace -> key -> value. */
@@ -77,13 +86,19 @@ export type MockOptions = {
    * another writer between the app's read and its write.
    */
   beforeEntryWrite?: (write: { namespace: string; key: string }, store: MockStore) => void
+  /**
+   * Called before every data-store write. A status code returned (e.g. 500)
+   * answers the write with that error instead: nothing is stored and nothing
+   * is recorded in `writes`. Undefined lets the write through.
+   */
+  failWrite?: (write: PendingWrite) => number | undefined
 }
 
 export type MockHandle = {
   orgs: MockOrg[]
   store: MockStore
   writes: RecordedWrite[]
-  /** "GET /org", "PUT /project/p-tiny/data/satellite.labels/x", … in order. */
+  /** "GET /org", "PUT /project/p-tiny/data/estimate.sheets/sheet-1", … in order. */
   calls: string[]
   /** Flip the 401 switch after the page has signed in. */
   setUnauthorized: (value: boolean) => void
@@ -174,6 +189,14 @@ export async function installMockVimServer(
       store.set(namespace, found)
     }
     return found
+  }
+
+  /** Answers a write `failWrite` wants to fail; true when it did. */
+  const refused = async (route: Route, write: PendingWrite): Promise<boolean> => {
+    const status = options.failWrite?.(write)
+    if (status === undefined) return false
+    await route.fulfill(problem(status, 'Write refused', `The mock refused ${write.kind} on ${write.namespace}.`))
+    return true
   }
 
   const findProject = (id: string): { org: MockOrg; project: MockProject } | undefined => {
@@ -337,6 +360,7 @@ export async function installMockVimServer(
         return
       }
       if (method === 'PUT') {
+        if (await refused(route, { kind: 'put-batch', namespace })) return
         const body = route.request().postDataJSON() as unknown
         const entries = Array.isArray(body) ? (body as { key: string; value: unknown }[]) : []
         let created = 0
@@ -355,6 +379,7 @@ export async function installMockVimServer(
         return
       }
       if (method === 'DELETE') {
+        if (await refused(route, { kind: 'delete-namespace', namespace })) return
         store.delete(namespace)
         handle.writes.push({ kind: 'delete', namespace, keys: ['*'] })
         await route.fulfill({ status: 204, body: '' })
@@ -365,6 +390,7 @@ export async function installMockVimServer(
     const batchDelete = /^\/data\/([^/]+)\/delete$/.exec(rest)
     if (batchDelete && method === 'POST') {
       const namespace = decodeURIComponent(batchDelete[1])
+      if (await refused(route, { kind: 'delete-batch', namespace })) return
       const body = route.request().postDataJSON() as unknown
       const keys = Array.isArray(body) ? (body as string[]) : []
       let deleted = 0
@@ -394,6 +420,7 @@ export async function installMockVimServer(
         return
       }
       if (method === 'PUT') {
+        if (await refused(route, { kind: 'put', namespace, key })) return
         options.beforeEntryWrite?.({ namespace, key }, store)
         const existing = bucket(namespace).get(key)
         const ifMatch = await route.request().headerValue('if-match')
@@ -422,6 +449,7 @@ export async function installMockVimServer(
         return
       }
       if (method === 'DELETE') {
+        if (await refused(route, { kind: 'delete', namespace, key })) return
         bucket(namespace).delete(key)
         handle.writes.push({ kind: 'delete', namespace, keys: [key] })
         await route.fulfill({ status: 204, body: '' })

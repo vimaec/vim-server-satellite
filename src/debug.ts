@@ -29,11 +29,6 @@ export type SatelliteDebug = {
   getEstimate: () => DebugEstimate | null
   /** Whether the app hides this element in 3D (it is excluded in the active sheet). */
   isElementHidden: (index: number) => boolean
-  /**
-   * @deprecated The label-era name of `getEstimate().assignments`. Only the
-   * old labels spec still calls it; remove it together with that spec.
-   */
-  getAssignments: () => Record<string, Assignment>
 }
 
 /** The estimate fields the hook reads; the snapshot is built on demand, not on every change. */
@@ -86,6 +81,5 @@ export function installDebugHook(): void {
         hidden: [...estimate.hidden].sort((a, b) => a - b),
       },
     isElementHidden: (index) => estimate?.hidden.has(index) ?? false,
-    getAssignments: () => (estimate ? Object.fromEntries(estimate.assignments) : {}),
   }
 }

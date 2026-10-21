@@ -73,56 +73,56 @@ test.describe('mock VIM Server', () => {
     page,
   }) => {
     const mock = await installMockVimServer(page, {
-      data: { 'satellite.palette': { palette: { labels: [] } } },
+      data: { 'estimate.sheets': { 'sheet-1': { name: 'Estimate 1', markups: [] } } },
     })
     await page.goto('/')
 
     const result = await page.evaluate(
       async ([api, token]) => {
-        const base = `${api}/project/p-tiny/data/satellite.palette`
+        const base = `${api}/project/p-tiny/data/estimate.sheets`
         const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 
-        const read = await fetch(`${base}/palette`, { headers })
+        const read = await fetch(`${base}/sheet-1`, { headers })
         const etag = read.headers.get('etag')
 
-        const stale = await fetch(`${base}/palette`, {
+        const stale = await fetch(`${base}/sheet-1`, {
           method: 'PUT',
           headers: { ...headers, 'If-Match': '"99"' },
-          body: JSON.stringify({ labels: [{ id: 'a', name: 'Review', color: '#e5484d' }] }),
+          body: JSON.stringify({ name: 'Base', markups: [] }),
         })
-        const fresh = await fetch(`${base}/palette`, {
+        const fresh = await fetch(`${base}/sheet-1`, {
           method: 'PUT',
           headers: { ...headers, 'If-Match': etag ?? '' },
-          body: JSON.stringify({ labels: [{ id: 'a', name: 'Review', color: '#e5484d' }] }),
+          body: JSON.stringify({ name: 'Base', markups: [] }),
         })
         const missing = await fetch(`${base}/nope`, { headers })
 
         // If-None-Match: * is create-only, so it loses against an entry that exists.
-        const createOnly = await fetch(`${base}/palette`, {
+        const createOnly = await fetch(`${base}/sheet-1`, {
           method: 'PUT',
           headers: { ...headers, 'If-None-Match': '*' },
-          body: JSON.stringify({ labels: [] }),
+          body: JSON.stringify({ name: 'Other', markups: [] }),
         })
         const created = await fetch(`${base}/fresh-key`, {
           method: 'PUT',
           headers: { ...headers, 'If-None-Match': '*' },
-          body: JSON.stringify({ labels: [] }),
+          body: JSON.stringify({ name: 'Other', markups: [] }),
         })
 
-        const batch = await fetch(`${api}/project/p-tiny/data/satellite.labels`, {
+        const batch = await fetch(`${api}/project/p-tiny/data/estimate.sheet.sheet-1`, {
           method: 'PUT',
           headers,
           body: JSON.stringify([
-            { key: 'uid-1', value: { labelId: 'a' } },
-            { key: 'uid-2', value: { labelId: 'a' } },
+            { key: 'uid-1', value: { code: 'code-a' } },
+            { key: 'uid-2', value: { code: 'code-a' } },
           ]),
         })
-        const removed = await fetch(`${api}/project/p-tiny/data/satellite.labels/delete`, {
+        const removed = await fetch(`${api}/project/p-tiny/data/estimate.sheet.sheet-1/delete`, {
           method: 'POST',
           headers,
           body: JSON.stringify(['uid-1']),
         })
-        const list = await fetch(`${api}/project/p-tiny/data/satellite.labels`, { headers })
+        const list = await fetch(`${api}/project/p-tiny/data/estimate.sheet.sheet-1`, { headers })
 
         return {
           etag,
@@ -150,9 +150,7 @@ test.describe('mock VIM Server', () => {
     expect(result.list.map((entry) => entry.key)).toEqual(['uid-2'])
 
     // The 412 did not change the stored value, the successful write did.
-    expect(mock.entry('satellite.palette', 'palette')).toEqual({
-      labels: [{ id: 'a', name: 'Review', color: '#e5484d' }],
-    })
+    expect(mock.entry('estimate.sheets', 'sheet-1')).toEqual({ name: 'Base', markups: [] })
     expect(mock.writes.filter((write) => write.kind === 'put-batch')).toHaveLength(1)
   })
 

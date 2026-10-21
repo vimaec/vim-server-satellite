@@ -228,6 +228,8 @@ export function useEstimate(
   const failureSeq = useRef(0)
   /** Bumped on every sheet switch; a slower read of an older switch is dropped. */
   const switchSeq = useRef(0)
+  /** Per sheet id: how many edits of its document were made, so only the newest adopts the server's copy. */
+  const sheetEditsRef = useRef(new Map<string, number>())
   /** The latest `flush`, for the project-change cleanup (declared before `flush` exists). */
   const flushRef = useRef<() => void>(() => undefined)
   const projectIdRef = useRef(projectId)
@@ -580,12 +582,18 @@ export function useEstimate(
       const before = sheetsRef.current.find((entry) => entry.id === id)
       if (!before) return
       setSheetsNow(sheetsRef.current.map((entry) => (entry.id === id ? mutate(entry) : entry)))
+      const seq = (sheetEditsRef.current.get(id) ?? 0) + 1
+      sheetEditsRef.current.set(id, seq)
       const project = projectId
       enqueue(async () => {
         const local = sheetsRef.current.find((entry) => entry.id === id)
         // A virtual sheet is created with the change already in it; the update below is then a no-op.
         await ensureStored(project, local ?? mutate(before))
-        await store.updateSheet(project, id, mutate)
+        const stored = await store.updateSheet(project, id, mutate)
+        // After a 412 the stored sheet also holds someone else's change: show it. Not when a
+        // newer edit of this sheet is queued, which would flash back; that one adopts its own.
+        if (project !== projectIdRef.current || sheetEditsRef.current.get(id) !== seq) return
+        setSheetsNow(sheetsRef.current.map((entry) => (entry.id === id ? stored : entry)))
       })
     },
     [enqueue, ensureStored, projectId, setSheetsNow],

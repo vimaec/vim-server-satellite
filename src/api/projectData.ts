@@ -1,8 +1,9 @@
 /**
  * The project custom data store: namespace + key -> arbitrary JSON.
  *
- * This is where the satellite keeps its own state (the label palette and the
- * per-element assignments) without any server-side code of its own.
+ * This is where the satellite keeps its own state (the estimate: cost codes,
+ * work packages, sheets and per-element assignments, see estimate/store.ts)
+ * without any server-side code of its own.
  */
 import { apiFetch, apiRequest, jsonBody, path } from './http'
 import type { DataEntry } from './types'
@@ -85,7 +86,7 @@ export async function putEntry(
   })
 }
 
-/** Batch upsert. Used when one user action labels many elements at once. */
+/** Batch upsert. Used when one user action changes many elements at once. */
 export async function putEntries<T>(
   projectId: string,
   namespace: string,
