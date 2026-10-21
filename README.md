@@ -490,13 +490,13 @@ mounts `<DsHost />` once for the DS dialogs, toasts and tooltips. The fonts are 
 that Vite bundles with the build's base path, so they also load under the GitHub Pages sub-path.
 `src/ds/README.md` records the vim-html-ds commit the copy came from.
 
-The copy has one deviation from upstream: vim-html-ds still uses the commercial Retina font for
-titles, and this copy does not. The Retina `@font-face` rules and font files are removed, and
-`--font-display` is Roboto, so titles show in Roboto bold. The copy keeps this deviation until
-vim-html-ds drops Retina too.
+The copy has one deviation from upstream: vim-html-ds still uses a commercially licensed display font
+for titles, and this copy uses only open fonts. That font's `@font-face` rules and files are not
+copied, and `--font-display` is Roboto, so titles show in Roboto bold. The copy keeps this deviation
+until vim-html-ds uses an open title font too.
 
 To refresh it: copy `styles/ds.css` and `styles/fonts/*` from vim-html-ds again, reapply the
-no-Retina deviation as `src/ds/README.md` describes, update the commit hash there, and compare the DS
+Roboto-titles deviation as `src/ds/README.md` describes, update the commit hash there, and compare the DS
 factories that the React components mirror (`git diff <old>..<new> -- src/` in vim-html-ds) for
 changed markup or class names.
 

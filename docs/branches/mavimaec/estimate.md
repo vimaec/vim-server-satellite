@@ -73,7 +73,7 @@
 - [ ] Open the same project in two browsers; edit different markups in each, reload both; both changes are kept
 - [ ] Drag the panel divider and the Cost Details divider; both panes resize and the 3D view reflows
 - [ ] Check the look: dark VIM design system fonts and colors on sign-in, project picker and project pages
-- [ ] Look at the panel, dialog and top-bar titles; they show in Roboto bold, and dev tools show no Retina font loaded
+- [ ] Look at the panel, dialog and top-bar titles; they show in Roboto bold, and dev tools load only the Roboto and Fluent icon fonts
 - [ ] Change a cost code price in a second browser, then click the refresh button next to "Estimate"; the new price and TOTAL show without a page reload
 - [ ] Click refresh while you type a note; the note is kept after the refresh
 - [ ] The 3D view background is #0b121c (sample it with a color picker), before and after the model loads
@@ -105,5 +105,5 @@
 - Set the 3D viewer background to #0b121c and hide the axis widget
 - Lighten ghosted elements, and restyle the vim-web control bar, its tooltips and the panels it opens in the design system theme
 - Send at most two data-store write requests at a time, and retry safe requests when VIM Server is busy (no answer, 429 or 5xx), so bulk changes on large sheets do not fail with CORS errors
-- Restyle the app with a copy of the vim-html-ds design system (stylesheet, Roboto and Fluent icon fonts, React components); titles use Roboto bold, not the commercial Retina font
+- Restyle the app with a copy of the vim-html-ds design system (stylesheet, Roboto and Fluent icon fonts, React components); titles use Roboto bold, so only open-licence fonts ship
 - Replace the label end-to-end tests with estimate tests, and rewrite the README for the Estimate sample
