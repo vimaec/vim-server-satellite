@@ -35,8 +35,9 @@
 - ✅ Where do per-user view settings go?
     Recommendation: Browser localStorage.
     Browser localStorage.
-- ❓ The design system uses the commercial Retina fonts (`src/ds/fonts/Retina-*`). The GitHub Pages build of this public repo will serve them. Does the Retina licence allow this?
+- ✅ The design system uses the commercial Retina fonts (`src/ds/fonts/Retina-*`). The GitHub Pages build of this public repo will serve them. Does the Retina licence allow this?
     Recommendation: Keep them. The vim-html-ds gallery on GitHub Pages already serves the same fonts publicly. If the licence does not allow it, remove the Retina files and let ds.css fall back to Roboto.
+    Keep things as they are. The design system will soon be updated to remove the Retina font, and this repository has only limited exposure.
 
 ## Manual Tests
 
