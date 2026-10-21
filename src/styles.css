@@ -173,10 +173,10 @@ h3 {
 
 /* === vim-web control bar, in the DS theme ==================================
    vim-web draws its bar as white pills with shadows (node_modules/vim-web/
-   dist/style.css, "Control Bar"); these rules put it in the DS envelope: flat
-   --stage fills, 1px hairlines, square groups, --ds-radius-btn buttons, no
-   shadow, no transition. The buttons follow .ds-iconbtn (ds.css): the same
-   size, fill, active and disabled look.
+   dist/style.css, "Control Bar"); these rules give it the DS colours: flat
+   --stage fills, 1px hairlines, no shadow, no transition. The buttons follow
+   .ds-iconbtn (ds.css): the same size, fill, active and disabled look, but
+   round: capsule groups and circle buttons (see the section rule).
 
    vim-web's markup: .vim-control-bar holds one .vim-control-bar-section per
    group, each holding .vim-control-bar-button elements with
@@ -195,13 +195,17 @@ h3 {
   transition: none;
 }
 
-/* One group: a common region, like a DS menu surface (square, hairline). */
+/* One group: a common region, a capsule with a hairline.
+   Not the DS envelope (it rounds fully only for dots): the operator asked for it.
+   The same padding on all sides keeps each end button concentric with the
+   capsule end: outer radius 18 px (half of 26 + 2 x 4 + 2 x 1), inner radius
+   13 px (the circle), so the gap between them is 4 px all round. */
 .viewer-pane .vim-control-bar-section {
   gap: var(--ds-space-1);
   margin-bottom: 0;
   padding: var(--ds-space-1);
   border: 1px solid var(--hairline);
-  border-radius: 0;
+  border-radius: 9999px;
   background: var(--stage-800);
   box-shadow: none;
 }
@@ -210,7 +214,7 @@ h3 {
   width: var(--ds-control-h);
   height: var(--ds-control-h);
   border: 1px solid transparent;
-  border-radius: var(--ds-radius-btn);
+  border-radius: 50%;
   background: transparent;
   color: var(--text-300);
   transition: none;
@@ -234,7 +238,8 @@ h3 {
   color: var(--text-100);
 }
 
-/* vim-web turns its own focus ring off; keyboard users get the DS one. */
+/* vim-web turns its own focus ring off; keyboard users get the DS one. The
+   outline follows the button's radius, so it is a circle too. */
 .viewer-pane .vim-control-bar-button:focus-visible {
   outline: 1px solid var(--vim-cyan);
   outline-offset: 1px;

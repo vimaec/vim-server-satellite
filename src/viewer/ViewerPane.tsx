@@ -60,13 +60,14 @@ function rendererColor(hex: string): VIM.THREE.Color {
 const GHOST_COLOR = '#d6dce6'
 
 /**
- * The ghost fill's opacity, low so the ghosts stay behind what is shown: one
- * ghost face over the background comes out #1f2630, two #313842, and so on,
- * which is what draws the shape. vim-web's default is 7/255 (about 0.03). Its
- * isolation settings panel can change it for the session; with local storage
- * off (below) that change is not kept, so every page load starts from this.
+ * The ghost fill's opacity, very low (the operator's choice) so the ghosts are
+ * only a trace behind what is shown: one ghost face over the background comes
+ * out about #0d141e, two #0f1620, and so on, which is what draws the shape.
+ * vim-web's default is 7/255 (about 0.03). Its isolation settings panel can
+ * change it for the session; with local storage off (below) that change is not
+ * kept, so every page load starts from this.
  */
-const GHOST_OPACITY = 0.1
+const GHOST_OPACITY = 0.01
 
 /** The pane's own paint, for the moments before the canvas draws. */
 const PANE_STYLE = { background: VIEWER_BACKGROUND } as const

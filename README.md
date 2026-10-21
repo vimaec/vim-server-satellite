@@ -164,7 +164,7 @@ model loads. vim-web writes that colour to the screen without a linear-to-sRGB s
 again, and the viewer is created with `canReadLocalStorage: false`, so no setting saved by its
 settings panel applies either.
 
-Ghosted elements are a pale veil of the DS light grey `#d6dce6` (`--text-200`) at opacity 0.1
+Ghosted elements are a pale veil of the DS light grey `#d6dce6` (`--text-200`) at opacity 0.01
 (`GHOST_COLOR` and `GHOST_OPACITY`), not vim-web's near-black default, which vanishes on the dark
 background. They go to vim-web as the core setting `materials.ghost`, and the colour is built the
 same way as the background, because vim-web's ghost shader also writes it with no sRGB step. A ghost
@@ -182,8 +182,11 @@ face in full light shows the hex that the tree swatch and the cost legend show;
 
 vim-web's control bar and the panels it opens are restyled in the DS theme by the "vim-web control
 bar" section of `src/styles.css`, scoped to `.viewer-pane`: flat `--stage` groups with a 1px
-hairline, no shadow, and buttons that follow the DS icon button (`--ds-radius-btn`, the `--text`
-greys, a cyan keyline and tint for a mode that is on, 40 % opacity when not available). The
+hairline and no shadow, and buttons that follow the DS icon button (its size, the `--text` greys,
+a cyan keyline and tint for a mode that is on, 40 % opacity when not available). At the
+operator's request the shapes are round, which the DS keeps for dots only: each group is a
+capsule and each button a circle, with the same 4 px (`--ds-space-1`) padding on all sides so
+that the end buttons are concentric with the capsule ends. The
 Settings, Render Settings and Section Box panels keep vim-web's markup; their vim-web palette
 variables are pointed at DS tokens. vim-web's own CSS in `node_modules` is not changed.
 

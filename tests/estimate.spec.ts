@@ -1023,7 +1023,7 @@ test.describe('estimate', () => {
     // DS --text-200, as it reaches the screen (vim-web writes it with no sRGB step).
     expect(await page.evaluate(() => window.__vimSatellite?.getViewerGhost())).toEqual({
       color: '#d6dce6',
-      opacity: 0.1,
+      opacity: 0.01,
     })
     // vim-web's "Show Ghost" is on, so what the estimate hides in 3D is drawn as a ghost.
     await selectElement(page, WALL)
@@ -1079,17 +1079,32 @@ test.describe('estimate', () => {
         return value
       }, name)
 
-    // A group: a flat DS surface with a hairline, square, no shadow (vim-web: a white pill).
+    /** The element's corner radius in px, and the shorter side of its box. */
+    const roundness = (locator: Locator) =>
+      locator.evaluate((element) => {
+        const style = getComputedStyle(element)
+        const box = element.getBoundingClientRect()
+        const radius = style.borderTopLeftRadius
+        // A percentage is of the box (a circle at 50 %); anything else is px.
+        const px = radius.endsWith('%') ? (parseFloat(radius) / 100) * box.width : parseFloat(radius)
+        return { radius: px, side: Math.min(box.width, box.height) }
+      })
+
+    // A group: a flat DS surface with a hairline and no shadow (vim-web: a white pill with a
+    // shadow), and a capsule: its ends are fully round.
     const section = bar.locator('.vim-control-bar-section').first()
     await expect(section).toHaveCSS('background-color', await token('--stage-800'))
     await expect(section).toHaveCSS('border-top-color', await token('--hairline'))
     await expect(section).toHaveCSS('border-top-width', '1px')
-    await expect(section).toHaveCSS('border-radius', '0px')
     await expect(section).toHaveCSS('box-shadow', 'none')
+    const group = await roundness(section)
+    expect(group.radius).toBeGreaterThanOrEqual(group.side / 2)
 
-    // A button: the DS button radius, the DS text grey; the mode that is on (Orbit) has the cyan keyline.
+    // A button: a circle, the DS text grey; the mode that is on (Orbit) has the cyan keyline.
     const pan = bar.locator('.vim-control-bar-button[data-tip="Pan"]')
-    await expect(pan).toHaveCSS('border-radius', '3px')
+    await expect(pan).toHaveCSS('border-radius', '50%')
+    const circle = await roundness(pan)
+    expect(circle.radius).toBeCloseTo(circle.side / 2, 1)
     await expect(pan).toHaveCSS('color', await token('--text-300'))
     const orbit = bar.locator('.vim-control-bar-button[data-tip="Orbit"]')
     await expect(orbit).toHaveAttribute('data-on', 'true')

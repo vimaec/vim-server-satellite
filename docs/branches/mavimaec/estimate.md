@@ -16,8 +16,9 @@
 - Add a "refresh" button next to the "Estimate" title that reloads the cost and estimation data from VIM Server.
 - Set the background color of the vim-web viewer to #0b121c.
 - Disable the axis widget in the top right of the 3D view.
-- Give ghosted elements a lighter color that reads well on the dark background.
-- Style the vim-web control bar to match the design system theme.
+- Give ghosted elements a lighter color that reads well on the dark background, with a default ghost opacity of 0.01.
+- Style the vim-web control bar to match the design system theme, with circular buttons and rounded capsule sections.
+- Do not rely on the element index: it can be inconsistent between exports.
 - Use lighter, brighter colors for the "Display" color modes in the 3D view.
 
 ## Questions
@@ -75,7 +76,9 @@
 - [ ] The 3D view background is #0b121c (sample it with a color picker), before and after the model loads
 - [ ] The axis widget does not show in the top right of the 3D view; the "Cost Details" button sits in the top-right corner
 - [ ] Isolate a selection (or exclude elements with ghosting on); the ghosted elements show light, not black, on the dark background
+- [ ] Isolate a selection; the ghosted elements are a very faint light veil (opacity 0.01 by default), and the isolation panel shows 0.01
 - [ ] The control bar at the bottom of the 3D view uses the dark design system colors; hover, active and disabled buttons are clear
+- [ ] The control bar sections are rounded capsules and each button is a circle; hover, active and disabled stay clear
 - [ ] Open Settings, the isolation settings (sliders button) and Help from the control bar; the panels are dark with readable text and inputs
 - [ ] Select an element, then click Help in the control bar; the Help close button in the top-right corner is not covered by "Cost Details"
 - [ ] On "MEP Estimate Sheet" in Medical Tower Project, check the header box (include all), then uncheck it again; both complete with no CORS error in the browser console and no error toast
