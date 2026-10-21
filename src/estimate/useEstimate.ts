@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as VIM from 'vim-web'
 import { useAuth } from '../auth/AuthProvider'
-import { DEFAULT_CURRENCY, NO_KEY_MANY, NO_KEY_ONE, makeT, money as formatMoney } from './i18n'
+import { COUNT, DEFAULT_CURRENCY, NO_KEY, makeT, money as formatMoney, tn } from './i18n'
 import type { Translator } from './i18n'
 import { loadActiveSheet, loadLang, saveActiveSheet, saveLang } from './prefs'
 import { codeUsage, computeTotals, priceRows } from './pricing'
@@ -1067,7 +1067,7 @@ export function useEstimate(
       }
       // The toast counts what is written: elements with no UniqueId are skipped.
       const keyed = storable(elements)
-      if (keyed.length === 0) return { tone: 'warn', text: t(elements.length === 1 ? NO_KEY_ONE : NO_KEY_MANY) }
+      if (keyed.length === 0) return { tone: 'warn', text: tn(t, NO_KEY, elements.length) }
       if (!assign(keyed, { code: code.id })) {
         const text = readOnlyRef.current
           ? t('Read only: your project role is {role}.', { role: roleRef.current })
@@ -1076,10 +1076,7 @@ export function useEstimate(
       }
       return {
         tone: 'good',
-        text: t('Cost code {code} pasted on {n} elements.', {
-          code: code.code,
-          n: keyed.length.toLocaleString(),
-        }),
+        text: tn(t, COUNT.pasted, keyed.length, { code: code.code }),
       }
     },
     [assign, storable, tNow],

@@ -299,6 +299,8 @@ test.describe('estimate', () => {
     await rowMenu(page, WALL, 'set-code')
     const dialog = page.getByTestId('dialog')
     await expect(dialog).toBeVisible()
+    // One element: the singular, not "1 elements".
+    await expect(dialog).toHaveAttribute('aria-label', 'Set Cost Code — 1 element')
     await dialog.locator('[data-testid="code-option"][data-id="+new"]').click()
     await page.getByTestId('new-code').fill('20-200')
     await page.getByTestId('new-name').fill('Brick wall')
@@ -310,7 +312,7 @@ test.describe('estimate', () => {
     // 4 m × 100, no markups yet.
     await expect(page.getByTestId('total-value')).toHaveText('$ 400')
     await expect(page.getByTestId('direct-cost')).toHaveText('Direct cost $ 400')
-    await expect(page.getByTestId('coded-count')).toHaveText(`1 of ${ELEMENT_COUNT} elements have a cost code`)
+    await expect(page.getByTestId('coded-count')).toHaveText(`1 of ${ELEMENT_COUNT} elements has a cost code`)
 
     await expect.poll(() => writesTo(mock, SHEET_1).length).toBe(1)
 
@@ -759,7 +761,7 @@ test.describe('estimate', () => {
     await waitForSheet(page)
     await expect(page.getByTestId('total-value')).toHaveText('€ 1,700')
     await page.keyboard.press('ControlOrMeta+v')
-    await expect(page.getByTestId('toast').filter({ hasText: 'Cost code 10-100 pasted on 1 elements.' })).toBeVisible()
+    await expect(page.getByTestId('toast').filter({ hasText: 'Cost code 10-100 pasted on 1 element.' })).toBeVisible()
     await expect.poll(() => mock.entry(SHEET_2, wall.key)).toMatchObject({ code: 'code-unit', wp: 'wp-shell' })
     expect(mock.writes.map((write) => write.namespace)).toEqual([SHEET_2])
   })
@@ -1203,7 +1205,7 @@ test.describe('estimate', () => {
     await clickElement(page, WALL)
     await expect.poll(() => selection(page)).toEqual([WALL])
     await page.keyboard.press('ControlOrMeta+v')
-    await expect(page.getByTestId('toast').filter({ hasText: 'Cost code 10-100 pasted on 1 elements.' })).toBeVisible()
+    await expect(page.getByTestId('toast').filter({ hasText: 'Cost code 10-100 pasted on 1 element.' })).toBeVisible()
 
     await expect.poll(() => mock.entry(SHEET_1, wall.key)).toMatchObject({ code: 'code-unit', elementId: '366043' })
     // 2650 + 1300 = 3950; × 1.2 = 4740.

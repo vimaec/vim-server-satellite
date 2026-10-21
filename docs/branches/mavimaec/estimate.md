@@ -67,6 +67,7 @@
 - [ ] Select 3 elements, click "Cost Details"; the Summary shows shared values or "varies" and the total amount
 - [ ] In Cost Details step with › and ‹; the 3D selection does not change, and with the camera toggle on the view frames each element
 - [ ] Select a coded element, Ctrl+C; select others, Ctrl+V; they get the same cost code
+- [ ] Select one element, open Set Cost Code; the title says "1 element" (not "1 elements"), and a paste on one element says "pasted on 1 element"
 - [ ] Right-click in the 3D view; the estimate menu opens and the selection stays
 - [ ] Click 日本語; the panel, top bar and viewer status show in Japanese; reload keeps the language
 - [ ] Open a project where your role is Viewer; a read-only banner shows and nothing can be changed

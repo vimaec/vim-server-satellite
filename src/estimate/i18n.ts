@@ -19,6 +19,47 @@ export const NO_KEY_ONE = 'This element has no Revit UniqueId, so estimate data 
 /** The same, for a group, a selection or a menu target where no element has one. */
 export const NO_KEY_MANY = 'These elements have no Revit UniqueId, so estimate data cannot be stored for them.'
 
+/**
+ * A string that embeds a count, in its two English forms: `one` for exactly 1,
+ * `other` for every other count, 0 included ("0 elements"). Both are keys, as
+ * English text always is here. Japanese has no grammatical plural, so JA gives
+ * both forms one text (see `both`): only the English output follows the count.
+ * NO_KEY is the exception: "this element" / "these elements" differ in JA too.
+ */
+export type Plural = { one: string; other: string }
+
+/** NO_KEY_ONE / NO_KEY_MANY as a count string, for `tn`. */
+export const NO_KEY: Plural = { one: NO_KEY_ONE, other: NO_KEY_MANY }
+
+/**
+ * The count strings. Constants for the reason NO_KEY_ONE is one: a typo in
+ * one form at a call site would silently drop that form's translation.
+ */
+export const COUNT = {
+  setCostCode: { one: 'Set Cost Code — {n} element', other: 'Set Cost Code — {n} elements' },
+  setWorkPackage: { one: 'Set Work Package — {n} element', other: 'Set Work Package — {n} elements' },
+  pasted: { one: 'Cost code {code} pasted on {n} element.', other: 'Cost code {code} pasted on {n} elements.' },
+  assigned: { one: 'Cost code assigned to {n} element.', other: 'Cost code assigned to {n} elements.' },
+  stepThrough: { one: 'Step through the {n} selected element', other: 'Step through the {n} selected elements' },
+  summaryHint: { one: '({n} element)', other: '({n} elements)' },
+  selected: { one: '{n} element selected', other: '{n} elements selected' },
+} satisfies Record<string, Plural>
+
+/**
+ * "{a} of {b} elements have a cost code" has two counts: the noun follows the
+ * total {b} and the verb the coded count {a} ("1 of 24 elements has", "2 of 24
+ * elements have", "1 of 1 element has"). By the form of {b}, then of {a}.
+ */
+export const CODED_COUNT: Record<keyof Plural, Plural> = {
+  one: { one: '{a} of {b} element has a cost code', other: '{a} of {b} element have a cost code' },
+  other: { one: '{a} of {b} elements has a cost code', other: '{a} of {b} elements have a cost code' },
+}
+
+/** JA entries for both forms of a count string: Japanese reads the same for any count. */
+function both(forms: Plural, ja: string): Record<string, string> {
+  return { [forms.one]: ja, [forms.other]: ja }
+}
+
 /** Strings of the ported features only (no export, project file, filter builder, Parameters view). */
 const JA: Record<string, string> = {
   // Panel, tabs, total
@@ -28,7 +69,8 @@ const JA: Record<string, string> = {
   'Markups': '経費率',
   'TOTAL': '合計金額',
   'Direct cost': '直接工事費',
-  '{a} of {b} elements have a cost code': '{b} 要素中 {a} 要素に単価コード設定済',
+  ...both(CODED_COUNT.one, '{b} 要素中 {a} 要素に単価コード設定済'),
+  ...both(CODED_COUNT.other, '{b} 要素中 {a} 要素に単価コード設定済'),
   '{n} without a quantity': '数量なし {n} 件',
   'Markups {pct}%': '経費 {pct}%',
   'Loading the estimate…': '積算を読み込み中…',
@@ -65,10 +107,10 @@ const JA: Record<string, string> = {
   'Open the cost details panel': '金額の詳細パネルを開く',
   'Close the cost details panel': '金額の詳細パネルを閉じる',
   'Select elements to see their estimate.': '要素を選択すると積算内容が表示されます。',
-  'Step through the {n} selected elements': '選択した {n} 個の要素を順に表示',
+  ...both(COUNT.stepThrough, '選択した {n} 個の要素を順に表示'),
   'Select more than one element to step between them': '2 つ以上の要素を選択すると順に表示できます',
-  '({n} elements)': '（{n} 要素）',
-  '{n} elements selected': '{n} 個の要素を選択中',
+  ...both(COUNT.summaryHint, '（{n} 要素）'),
+  ...both(COUNT.selected, '{n} 個の要素を選択中'),
   'Frame the shown element when stepping (on)': '切り替え時に表示中の要素へカメラを合わせる（オン）',
   'Frame the shown element when stepping (off)': '切り替え時に表示中の要素へカメラを合わせる（オフ）',
   'varies': '混在',
@@ -99,8 +141,8 @@ const JA: Record<string, string> = {
   'BIM Document': 'BIM ドキュメント',
   'Set Cost Code…': '単価コードを設定…',
   'Set Work Package…': '工種を設定…',
-  'Set Cost Code — {n} elements': '単価コードを設定 — {n} 要素',
-  'Set Work Package — {n} elements': '工種を設定 — {n} 要素',
+  ...both(COUNT.setCostCode, '単価コードを設定 — {n} 要素'),
+  ...both(COUNT.setWorkPackage, '工種を設定 — {n} 要素'),
   'Clear cost code': '単価コードを解除',
   'Apply': '適用',
   'New cost code…': '新しい単価コード…',
@@ -114,7 +156,7 @@ const JA: Record<string, string> = {
   'Cost code {code} copied.': '単価コード {code} をコピーしました。',
   'Copy a cost code first: select one element and press Ctrl+C.':
     '先に単価コードをコピーしてください：要素を 1 つ選択して Ctrl+C を押します。',
-  'Cost code {code} pasted on {n} elements.': '単価コード {code} を {n} 要素に貼り付けました。',
+  ...both(COUNT.pasted, '単価コード {code} を {n} 要素に貼り付けました。'),
   'Include': '対象にする',
   'Exclude': '対象外にする',
   'Included': '対象',
@@ -191,7 +233,7 @@ const JA: Record<string, string> = {
   'No cost code matches.': '一致する単価コードはありません。',
   'No cost codes yet. Add a code.': '単価コードがありません。コードを追加してください。',
   'Select elements in the 3D view or the Elements tab first.': '先に 3D ビューまたは「要素」タブで要素を選択してください。',
-  'Cost code assigned to {n} elements.': '{n} 要素に単価コードを設定しました。',
+  ...both(COUNT.assigned, '{n} 要素に単価コードを設定しました。'),
   '(No discipline)': '（区分なし）',
   '(No group)': '（分類なし）',
   'Count': '個数',
@@ -265,6 +307,25 @@ export function translate(lang: Lang, currency: string, text: string, vars?: Var
 /** `t` for one language and currency. */
 export function makeT(lang: Lang, currency: string): Translator {
   return (text, vars) => translate(lang, currency, text, vars)
+}
+
+/** 'one' for exactly 1, 'other' for any other count: English's two forms. */
+function formOf(n: number): keyof Plural {
+  return n === 1 ? 'one' : 'other'
+}
+
+/**
+ * `t` for a count string: the form that fits `n`, with `{n}` filled by `n`
+ * formatted as the counts always were (toLocaleString). `vars` fills the
+ * other slots.
+ */
+export function tn(t: Translator, forms: Plural, n: number, vars?: Vars): string {
+  return t(forms[formOf(n)], { n: n.toLocaleString(), ...vars })
+}
+
+/** The footer's "{a} of {b} elements have a cost code", worded for both counts (see CODED_COUNT). */
+export function codedText(t: Translator, coded: number, all: number): string {
+  return tn(t, CODED_COUNT[formOf(all)], coded, { a: coded.toLocaleString(), b: all.toLocaleString() })
 }
 
 /** A Revit category name in the UI language (Revit models carry the English names). */

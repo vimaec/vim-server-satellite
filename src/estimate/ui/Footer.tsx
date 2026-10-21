@@ -8,7 +8,7 @@
  * the meantime is not overwritten by this page's older copy of the list.
  */
 import { Button, IconButton, Input, NumberInput } from '../../ds'
-import { amount } from '../i18n'
+import { amount, codedText } from '../i18n'
 import { useEstimateUi } from './context'
 
 export function Footer(): JSX.Element {
@@ -84,10 +84,7 @@ export function Footer(): JSX.Element {
           {t('Markups {pct}%', { pct: Math.round(totals.markupPct * 100) / 100 })} {est.money(totals.markup)}
         </div>
         <div className="en-total__sub" data-testid="coded-count">
-          {t('{a} of {b} elements have a cost code', {
-            a: totals.ncode.toLocaleString(),
-            b: totals.nall.toLocaleString(),
-          })}
+          {codedText(t, totals.ncode, totals.nall)}
         </div>
         {totals.nmissing ? (
           <div className="en-total__sub en-total__sub--warn" data-testid="missing-count">

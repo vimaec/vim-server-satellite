@@ -9,7 +9,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from '../../ds'
-import { NO_KEY_MANY, NO_KEY_ONE } from '../i18n'
+import { NO_KEY, tn } from '../i18n'
 import type { Estimate, Feedback } from '../useEstimate'
 import { EditCostCodeDialog } from './EditCostCodeDialog'
 import { SetCostCodeDialog } from './SetCostCodeDialog'
@@ -114,7 +114,7 @@ export function EstimateUiProvider(props: EstimateUiProviderProps): JSX.Element 
       }
       const keyed = storable(elements)
       if (keyed.length) return keyed
-      toast(tRef.current(elements.length === 1 ? NO_KEY_ONE : NO_KEY_MANY), 'warn')
+      toast(tn(tRef.current, NO_KEY, elements.length), 'warn')
       return null
     },
     [storable],
@@ -186,7 +186,7 @@ function useShortcuts(ui: EstimateUi): void {
       else if (!selection.length) return
       else if (est.storable(selection).length) est.toggleIncluded(selection)
       // Only elements with no UniqueId: say why nothing happens, as Paste does.
-      else notify({ tone: 'warn', text: est.t(selection.length === 1 ? NO_KEY_ONE : NO_KEY_MANY) })
+      else notify({ tone: 'warn', text: tn(est.t, NO_KEY, selection.length) })
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

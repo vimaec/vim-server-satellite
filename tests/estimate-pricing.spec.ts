@@ -17,7 +17,7 @@ import {
   visibleRows,
 } from '../src/estimate/grouping'
 import type { GroupNode, TreeNode } from '../src/estimate/grouping'
-import { makeT, money, parseNumber } from '../src/estimate/i18n'
+import { CODED_COUNT, COUNT, NO_KEY, codedText, makeT, money, parseNumber, tn } from '../src/estimate/i18n'
 import {
   COST_STOPS,
   DATA_LIFT,
@@ -534,6 +534,42 @@ test.describe('i18n', () => {
     expect(makeT('en', 'USD')('Cost code {code} copied.', { code: '¥-1' })).toBe('Cost code ¥-1 copied.')
     expect(makeT('ja', 'USD')('{n} without a quantity', { n: 3 })).toBe('数量なし 3 件')
     expect(money(1234.4, 'GBP')).toBe('£ 1,234')
+  })
+
+  test('a count string is singular for exactly 1 and plural otherwise, 0 included', () => {
+    const t = makeT('en', 'USD')
+    expect(tn(t, COUNT.setCostCode, 0)).toBe('Set Cost Code — 0 elements')
+    expect(tn(t, COUNT.setCostCode, 1)).toBe('Set Cost Code — 1 element')
+    expect(tn(t, COUNT.setCostCode, 2)).toBe('Set Cost Code — 2 elements')
+    expect(tn(t, COUNT.pasted, 1, { code: '10-100' })).toBe('Cost code 10-100 pasted on 1 element.')
+    expect(tn(t, COUNT.pasted, 1234, { code: '10-100' })).toBe(`Cost code 10-100 pasted on ${(1234).toLocaleString()} elements.`)
+    expect(tn(t, NO_KEY, 1)).toBe('This element has no Revit UniqueId, so estimate data cannot be stored for it.')
+    expect(tn(t, NO_KEY, 0)).toBe('These elements have no Revit UniqueId, so estimate data cannot be stored for them.')
+  })
+
+  test('Japanese has no plural: both forms of every count string read the same, as before', () => {
+    const ja = makeT('ja', 'JPY')
+    expect(tn(ja, COUNT.setCostCode, 1)).toBe('単価コードを設定 — 1 要素')
+    expect(tn(ja, COUNT.setCostCode, 2)).toBe('単価コードを設定 — 2 要素')
+    expect(tn(ja, COUNT.pasted, 1, { code: 'A' })).toBe('単価コード A を 1 要素に貼り付けました。')
+    // NO_KEY is not here: its JA says "this element" / "these elements" (この / これら), as it always did.
+    for (const forms of [...Object.values(COUNT), ...Object.values(CODED_COUNT)]) {
+      expect(ja(forms.one)).toBe(ja(forms.other))
+      expect(ja(forms.other)).not.toBe(forms.other)
+    }
+  })
+
+  test('"{a} of {b} elements": the noun follows the total, the verb the coded count', () => {
+    const t = makeT('en', 'USD')
+    expect(codedText(t, 0, 24)).toBe('0 of 24 elements have a cost code')
+    expect(codedText(t, 1, 24)).toBe('1 of 24 elements has a cost code')
+    expect(codedText(t, 2, 24)).toBe('2 of 24 elements have a cost code')
+    expect(codedText(t, 1, 1)).toBe('1 of 1 element has a cost code')
+    expect(codedText(t, 0, 1)).toBe('0 of 1 element have a cost code')
+    expect(codedText(t, 0, 0)).toBe('0 of 0 elements have a cost code')
+    const ja = makeT('ja', 'JPY')
+    expect(codedText(ja, 1, 1)).toBe('1 要素中 1 要素に単価コード設定済')
+    expect(codedText(ja, 2, 24)).toBe('24 要素中 2 要素に単価コード設定済')
   })
 
   test('typed numbers allow full-width digits, symbols and commas', () => {

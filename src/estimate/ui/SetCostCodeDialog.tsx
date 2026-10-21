@@ -5,7 +5,7 @@
  */
 import { useMemo, useState } from 'react'
 import { Button, FormField, Icon, Input, Modal, Search, Select, cx } from '../../ds'
-import { amount, basisLabel, parseNumber } from '../i18n'
+import { COUNT, amount, basisLabel, parseNumber, tn } from '../i18n'
 import { costCodeLabel } from '../grouping'
 import { BASES } from '../types'
 import type { Basis } from '../types'
@@ -74,7 +74,7 @@ export function SetCostCodeDialog({ elements, onClose }: { elements: number[]; o
     <Modal
       open
       size="lg"
-      title={t('Set Cost Code — {n} elements', { n: elements.length.toLocaleString() })}
+      title={tn(t, COUNT.setCostCode, elements.length)}
       data-testid="dialog"
       onClose={onClose}
       foot={

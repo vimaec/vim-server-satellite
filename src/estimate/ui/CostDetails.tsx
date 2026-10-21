@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconButton, Label, Panel, Select, TextArea, cx } from '../../ds'
 import type { SelectOption } from '../../ds'
-import { NO_KEY_MANY, NO_KEY_ONE, categoryLabel, qtyText } from '../i18n'
+import { COUNT, NO_KEY, categoryLabel, qtyText, tn } from '../i18n'
 import type { Translator } from '../i18n'
 import { costCodeLabel, workPackageName } from '../grouping'
 import { BASIS_UNIT } from '../types'
@@ -131,7 +131,7 @@ export function CostDetails({ onClose }: { onClose: () => void }): JSX.Element {
               onChange={step}
               title={
                 steps.length > 1
-                  ? t('Step through the {n} selected elements', { n: rows.length.toLocaleString() })
+                  ? tn(t, COUNT.stepThrough, rows.length)
                   : undefined
               }
               data-testid="details-pager"
@@ -179,7 +179,7 @@ function pagerOptions(selected: ElementFacts[], t: Translator): SelectOption[] {
   if (selected.length === 0) return []
   if (selected.length === 1) return [elementOption(selected[0], 1, 1)]
   const options: SelectOption[] = [
-    { id: SUMMARY, label: t('Summary'), hint: t('({n} elements)', { n: selected.length.toLocaleString() }) },
+    { id: SUMMARY, label: t('Summary'), hint: tn(t, COUNT.summaryHint, selected.length) },
     ...selected.slice(0, PAGER_MAX).map((facts, i) => elementOption(facts, i + 1, selected.length)),
   ]
   const more = selected.length - PAGER_MAX
@@ -211,7 +211,7 @@ function SummaryView({ rows }: { rows: Shown[] }): JSX.Element {
     <>
       <div className="ed-facts">
         <Label as="div" variant="eyebrow">
-          {t('{n} elements selected', { n: rows.length.toLocaleString() })}
+          {tn(t, COUNT.selected, rows.length)}
         </Label>
         <Line label={t('Category')} value={categoryLabel(est.lang, category.value ?? '')} varies={!category.same} />
         <Line label={t('Level')} value={level.value} varies={!level.same} />
@@ -272,7 +272,7 @@ function Fields({ rows }: { rows: Shown[] }): JSX.Element {
   // Nothing can be stored for elements with no UniqueId (keys.ts): the fields are disabled
   // when every shown element is one, and the writes skip them when only some are.
   const noKey = est.storable(elements).length === 0
-  const noKeyTip = noKey ? t(elements.length === 1 ? NO_KEY_ONE : NO_KEY_MANY) : undefined
+  const noKeyTip = noKey ? tn(t, NO_KEY, elements.length) : undefined
   const canEdit = est.canEdit && !noKey
 
   const wp = common(rows, (entry) => entry.row.wp ?? NONE)

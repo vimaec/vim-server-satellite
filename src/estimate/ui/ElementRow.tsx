@@ -11,7 +11,7 @@ import { memo } from 'react'
 import type { MouseEvent } from 'react'
 import { Checkbox, Select, cx } from '../../ds'
 import type { CheckboxState, SelectOption } from '../../ds'
-import { NO_KEY_MANY, NO_KEY_ONE, amount, qtyText } from '../i18n'
+import { NO_KEY, amount, qtyText, tn } from '../i18n'
 import { MIXED, checkState, groupLabel } from '../grouping'
 import type { LabelContext, TreeNode } from '../grouping'
 import type { Translator } from '../i18n'
@@ -86,7 +86,7 @@ export const ElementRow = memo(function ElementRow(props: ElementRowProps): JSX.
   // Nothing can be stored for an element with no UniqueId (keys.ts): its controls, and
   // those of a group made only of such elements, are disabled and say why.
   const noKey = leaf ? leaf.facts.key === null : group !== null && group.count > 0 && group.unkeyed === group.count
-  const noKeyTip = noKey ? t(leaf ? NO_KEY_ONE : NO_KEY_MANY) : undefined
+  const noKeyTip = noKey ? tn(t, NO_KEY, group ? group.count : 1) : undefined
   const writable = canEdit && !noKey
 
   return (

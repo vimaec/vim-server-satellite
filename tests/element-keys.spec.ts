@@ -219,7 +219,7 @@ test.describe('element keys', () => {
     await clickElement(page, BARE, ['ControlOrMeta'])
     await expect.poll(() => selection(page)).toEqual([WALL_2, BARE])
     await page.keyboard.press('ControlOrMeta+v')
-    await expect(toast(page, 'Cost code 10-100 pasted on 1 elements.')).toBeVisible()
+    await expect(toast(page, 'Cost code 10-100 pasted on 1 element.')).toBeVisible()
     await expect(elementRow(page, BARE).getByTestId('row-code')).toHaveAttribute('data-value', '')
 
     // A menu on a selection with keys acts on those; on BARE alone, the verbs are off.

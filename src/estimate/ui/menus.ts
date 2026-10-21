@@ -11,7 +11,7 @@
 import { confirm } from '../../ds'
 import type { MenuEntry } from '../../ds'
 import { costCodeLabel, workPackageName } from '../grouping'
-import { NO_KEY_MANY, NO_KEY_ONE } from '../i18n'
+import { NO_KEY, tn } from '../i18n'
 import type { EstimateUi } from './context'
 
 export type ElementMenuOptions = {
@@ -29,7 +29,7 @@ export function elementMenu(ui: EstimateUi, targets: readonly number[], options:
   const none = targets.length === 0
   const noKey = !none && est.storable(targets).length === 0
   const write = !canEdit || none || noKey
-  const tip = noKey ? t(targets.length === 1 ? NO_KEY_ONE : NO_KEY_MANY) : undefined
+  const tip = noKey ? tn(t, NO_KEY, targets.length) : undefined
   const copied = est.copiedCode ? est.costCodes.get(est.copiedCode) : undefined
   const items: MenuEntry[] = [
     { label: t('Set Cost Code…'), action: 'set-code', disabled: write, tip, onClick: () => ui.openCostCode(targets) },

@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { Button, FormField, Input, Modal, Select } from '../../ds'
 import type { SelectOption } from '../../ds'
 import { workPackageName } from '../grouping'
+import { COUNT, tn } from '../i18n'
 import { useEstimateUi } from './context'
 
 const NEW = '+new'
@@ -49,7 +50,7 @@ export function SetWorkPackageDialog({ elements, onClose }: { elements: number[]
     <Modal
       open
       variant="confirm"
-      title={t('Set Work Package — {n} elements', { n: elements.length.toLocaleString() })}
+      title={tn(t, COUNT.setWorkPackage, elements.length)}
       data-testid="dialog"
       onClose={onClose}
       foot={
