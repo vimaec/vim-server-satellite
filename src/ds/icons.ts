@@ -29,6 +29,9 @@ export const ICON_GLYPHS = {
   'chevron-down-glyph': '', // chevron_down_12_regular
   // delete_16_regular: a trash can. Not in the DS map; the Estimate workflow's markup rows use it.
   trash: '',
+  // arrow_clockwise_16_regular: read again from the server. Not in the DS map; the estimate panel
+  // head uses it. Code point read from the cmap of fonts/FluentSystemIcons-Regular.woff2.
+  refresh: '\uE0AA',
 } as const
 
 export type IconGlyphName = keyof typeof ICON_GLYPHS

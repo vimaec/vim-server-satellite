@@ -35,6 +35,8 @@ export type SatelliteDebug = {
   getEstimate: () => DebugEstimate | null
   /** Whether the app hides this element in 3D (it is excluded in the active sheet). */
   isElementHidden: (index: number) => boolean
+  /** The 3D view's background as vim-web's renderer holds it (`#rrggbb`), or null before the viewer exists. */
+  getViewerBackground: () => string | null
 }
 
 /** The estimate fields the hook reads; the snapshot is built on demand, not on every change. */
@@ -53,6 +55,7 @@ let stateName = 'loading'
 let selection: number[] = []
 let colors = new Map<number, string>()
 let estimate: DebugEstimateSource | null = null
+let viewerBackground: () => string | null = () => null
 
 export function setDebugState(next: string): void {
   stateName = next
@@ -68,6 +71,11 @@ export function setDebugColors(next: Map<number, string>): void {
 
 export function setDebugEstimate(next: DebugEstimateSource | null): void {
   estimate = next
+}
+
+/** How to read the viewer's background; null when the viewer is gone. */
+export function setDebugViewerBackground(read: (() => string | null) | null): void {
+  viewerBackground = read ?? (() => null)
 }
 
 declare global {
@@ -93,5 +101,6 @@ export function installDebugHook(): void {
         loads: estimate.loads,
       },
     isElementHidden: (index) => estimate?.hidden.has(index) ?? false,
+    getViewerBackground: () => viewerBackground(),
   }
 }

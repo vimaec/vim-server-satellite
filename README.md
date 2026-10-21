@@ -26,7 +26,7 @@ Live build: <https://vimaec.github.io/vim-server-satellite/>
 | Resolving a snapshot to a time-limited blob URL and loading it in the viewer | `src/pages/ProjectPage.tsx`, `src/viewer/` |
 | Per-element quantities read in bulk from the VIM's own BIM tables | `src/estimate/quantities.ts` |
 | Estimate data in the project data store: one namespace per kind, ETag read–modify–write for shared documents, batched last-write-wins for elements | `src/estimate/store.ts`, `src/estimate/useEstimate.ts` |
-| Optimistic writes through one serial queue, rolled back and re-read when the server refuses | `src/estimate/useEstimate.ts` |
+| Optimistic writes through one serial queue, rolled back and re-read when the server refuses; a reload that waits for them and keeps edits made while it reads | `src/estimate/useEstimate.ts` |
 | Pricing, totals, the cost colour ramp and the palette by grouping level, as pure functions | `src/estimate/pricing.ts` |
 | A virtualized, grouped element tree that drives and follows the 3D selection | `src/estimate/grouping.ts`, `src/estimate/ui/ElementTree.tsx`, `src/estimate/ui/VirtualTree.tsx` |
 | Excluded elements hidden in 3D, data colours applied per element, a right-click menu over the viewer | `src/viewer/ViewerPane.tsx`, `src/estimate/ui/menus.ts` |
@@ -154,6 +154,15 @@ resolved when the project page opens rather than cached. Omit `blobId` for the l
 pass one from `getVimHistory().history` to open an older one. A project whose `latestVim` is `null`
 has no snapshot; the picker disables it and says so.
 
+The 3D view's background is VIM navy, `#12293b` (`VIEWER_BACKGROUND` in
+`src/viewer/ViewerPane.tsx`). It goes to vim-web as the core setting `background.color`, the third
+argument of `React.Webgl.createViewer()`, and the pane under the canvas is painted with it too, so
+the colour is there before the viewer exists and before a model loads. vim-web writes that colour
+to the screen without a linear-to-sRGB step, so the `THREE.Color` is built with the hex values as
+they are (`LinearSRGBColorSpace`); `new THREE.Color('#12293b')` would be drawn almost black. Nothing
+in vim-web sets the background again, and the viewer is created with `canReadLocalStorage: false`,
+so no setting saved by its settings panel applies either.
+
 ### Element identity
 
 Three different ids show up around one element, and choosing the wrong one silently breaks
@@ -206,6 +215,11 @@ What a user does in the panel left of the viewer (`src/estimate/ui/`):
   follow the element shown.
 - **EN / 日本語.** The language switch in the panel head. It also translates the project page's top
   bar and the viewer's status line; the sign-in and project picker pages stay in English.
+- **Reload.** The button next to the Estimate title (`estimate-refresh`) reads the work packages,
+  cost codes, sheets (names, currency, markups) and the active sheet's assignments again from VIM
+  Server, to show what other people changed. Viewers can use it too: it only reads. While it runs
+  the button is disabled and the head says "Reloading…"; a read that fails shows a toast and leaves
+  the screen as it was. See **Concurrency** below for how it treats edits that are not stored yet.
 
 Per-user view settings stay in this browser's `localStorage`, under `vimSatellite.estimate.*`: the
 language, the active sheet per project, the grouping, the Display mode and its shuffle seed, and the
@@ -263,7 +277,13 @@ the app takes that as "it exists" and writes into it.
   only taken in when no edit was made while it was out; otherwise it runs again after that edit's
   write, so an older read never takes a newer edit off the screen (the next edit of that element
   would then write the stale entry back). There is no polling: the data is read when the project
-  opens, after a failed write, and on Retry.
+  opens, after a failed write, on Retry, and on **Reload** (`reload()` in the hook).
+- **Reload** sends the assignment batch that is waiting, waits until the write queue is empty, and
+  only then reads, so the read sees this page's own edits. It is the same re-read as after a
+  failure: an edit made while the read is out makes the read run again after that edit's write,
+  never take it off the screen. It keeps the active sheet; when that sheet was deleted elsewhere,
+  it opens the first sheet, and the active sheet and its assignments change in one step, as for a
+  switch.
 - **Switching sheets.** The hook holds the active sheet's id and its assignments as one value, and
   takes assignment writes only while that value has the assignments of that sheet. A switch drops
   the previous sheet's assignments at once and reads the new sheet's: until they arrive the tree
@@ -460,6 +480,7 @@ window.__vimSatellite = {
                                                 //   canEdit, sheetStatus: 'loading' | 'ready' | 'error',
                                                 //   loads: whole reads taken in so far }
   isElementHidden(index): boolean               // excluded in the active sheet, so hidden in 3D
+  getViewerBackground():  string | null         // vim-web's background colour, '#rrggbb'
 }
 ```
 
@@ -469,7 +490,7 @@ The specs:
 |---|---|
 | `auth.spec.ts` | Sign-in page, the PKCE reply and its `state` check, Entra errors, sign out, silent refresh, a refused refresh, the `/config` fallback, a `401` while signed in |
 | `projects.spec.ts` | The picker by organisation, a project without a VIM, the project page (title, snapshot, role), `?project=` across a reload, a hidden project, the loading and download-error states |
-| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
+| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Reload (changes made on the server, a deleted active sheet, a Viewer; an edit still being written, an edit made while it reads), the viewer background, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
 | `estimate-pricing.spec.ts` | The pure functions: pricing, totals and markups, the lump-sum and missing rules, the cost ramp, colours by level, grouping and search, the cost code tree, number parsing |
 | `estimate-quantities.spec.ts` | `readFacts()` on the fixture: metric lengths, areas and volumes, material fallbacks, names from the BIM tables |
 | `mock-server.spec.ts` | The harness itself: Range replies, data store preconditions, the bearer check |

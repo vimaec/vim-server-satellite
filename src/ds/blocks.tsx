@@ -140,6 +140,13 @@ export type PanelProps = DataAttributes & {
   subtitle?: ReactNode
   /** A hover tip on the title, for the tagline the subtitle does not carry. */
   tip?: string
+  /**
+   * Controls right after the title (and its crumb), one head gap away: the
+   * panel's own housekeeping (a reload), as against `actions`, which act on
+   * what the panel shows. Not in the vim-html-ds factory: the controls go
+   * straight into the head row, so `ds.css` lays them out with no extra CSS.
+   */
+  titleTools?: ReactNode
   /** The subject the panel is ON, after the title behind a "›" ("Estimate › Sheet 1"). */
   crumb?: ReactNode
   /** Panel-level controls, right-aligned in the head. */
@@ -165,7 +172,7 @@ export type PanelProps = DataAttributes & {
 export function Panel(props: PanelProps): JSX.Element {
   const { title, subtitle, crumb, actions, onClose, foot } = props
   // A head with nothing to say is no head at all (as the DS).
-  const hasHead = Boolean(title || subtitle || onClose || actions || crumb)
+  const hasHead = Boolean(title || subtitle || onClose || actions || crumb || props.titleTools)
   const style: CSSProperties = { ...props.style }
   if (props.width !== undefined) style.width = typeof props.width === 'number' ? `${props.width}px` : props.width
   return (
@@ -180,6 +187,7 @@ export function Panel(props: PanelProps): JSX.Element {
             {title}
           </div>
           {crumb ? <div className="ds-panel__crumb">{crumb}</div> : null}
+          {props.titleTools}
           {subtitle ? <span className="ds-panel__subtitle">{subtitle}</span> : null}
           {actions ? <div className="ds-panel__actions">{actions}</div> : null}
           {onClose ? (

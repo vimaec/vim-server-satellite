@@ -85,8 +85,23 @@ export type Estimate = {
    * re-read. `seq` grows with each failure, so the UI can toast each one once.
    */
   failure: { seq: number; message: string } | null
-  /** How many whole reads of the estimate were taken in (project open, Retry, the re-read after a failure). */
+  /** How many whole reads of the estimate were taken in (project open, Retry, reload, the re-read after a failure). */
   loads: number
+  /**
+   * Reads everything again from VIM Server: the work packages, the cost codes,
+   * the sheets (names, currency, markups) and the active sheet's assignments,
+   * for changes other people made since. Pending writes go out first and are
+   * waited for. A read that an edit made while it was out would take off the
+   * screen is not taken in, but run again after that edit's write, as for the
+   * re-read after a failure. It keeps the active sheet, or opens the first one
+   * when the active sheet was deleted meanwhile. A read, so read-only roles may
+   * use it too. Does nothing until the estimate is loaded; while one runs,
+   * another call returns that one. Rejects when the read fails, and the screen
+   * then keeps what it had.
+   */
+  reload: () => Promise<void>
+  /** A `reload` is running. */
+  reloading: boolean
 
   /** The UI language (localStorage). */
   lang: Lang
@@ -253,7 +268,9 @@ export function useEstimate(
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | undefined>(undefined)
-  const [reload, setReload] = useState(0)
+  /** Bumped by Retry to run the first read again. */
+  const [retries, setRetries] = useState(0)
+  const [reloading, setReloading] = useState(false)
   const [loads, setLoads] = useState(0)
   const [failure, setFailure] = useState<{ seq: number; message: string } | null>(null)
   const [lang, setLangState] = useState<Lang>(loadLang)
@@ -398,7 +415,7 @@ export function useEstimate(
       flushRef.current()
       epochRef.current++
     }
-  }, [adopt, projectId, reload])
+  }, [adopt, projectId, retries])
 
   // ---- facts: once per loaded vim ------------------------------------------------------------
 
@@ -431,38 +448,61 @@ export function useEstimate(
   // ---- the write queue -----------------------------------------------------------------------
 
   /**
-   * Re-reads everything once the queue is idle, keeping the active sheet. The
-   * read is only taken in when no edit was made while it was out: such an edit
-   * is on screen and its write lands after the read, so the read would take it
-   * off the screen, and the next edit of that element would be built from the
-   * stale entry and write it back whole. The read then runs again, after that
-   * write.
+   * Re-reads everything once the queue is idle, keeping the active sheet (the
+   * first sheet when the active one is gone from the server). The read is only
+   * taken in when no edit was made while it was out: such an edit is on screen
+   * and its write lands after the read, so the read would take it off the
+   * screen, and the next edit of that element would be built from the stale
+   * entry and write it back whole. The read then runs again, after that write;
+   * when edits keep coming it gives up, and the screen keeps them. Rejects when
+   * a read fails.
    */
-  const reloadQuietly = useCallback(() => {
+  const reread = useCallback(async (): Promise<void> => {
     const epoch = epochRef.current
-    void (async () => {
-      for (let attempt = 0; attempt < RELOAD_ATTEMPTS; attempt++) {
-        flushRef.current()
-        await chainRef.current.catch(() => undefined)
-        if (epoch !== epochRef.current) return
-        const writes = writeGenRef.current
-        const switches = switchSeq.current
-        let load: store.EstimateLoad
-        try {
-          load = await store.loadEstimate(projectId, activeRef.current.id)
-        } catch {
-          // The failure is already on screen; the next action or Retry tries again.
-          return
-        }
-        if (epoch !== epochRef.current) return
-        if (writes !== writeGenRef.current) continue
-        // The user opened another sheet meanwhile: its own read fills it.
-        if (switches !== switchSeq.current) adoptLists(load)
-        else adopt(load)
+    for (let attempt = 0; attempt < RELOAD_ATTEMPTS; attempt++) {
+      flushRef.current()
+      await chainRef.current.catch(() => undefined)
+      if (epoch !== epochRef.current) return
+      const writes = writeGenRef.current
+      const switches = switchSeq.current
+      const wanted = activeRef.current.id
+      const load = await store.loadEstimate(projectId, wanted)
+      if (epoch !== epochRef.current) return
+      if (writes !== writeGenRef.current) continue
+      // The user opened another sheet meanwhile: its own read fills it.
+      if (switches !== switchSeq.current) {
+        adoptLists(load)
         return
       }
-    })()
+      // adopt() replaces the active sheet and its assignments in one step (see ActiveSheet).
+      adopt(load)
+      // The active sheet was deleted elsewhere and the read fell back to the first one: remember that.
+      if (load.sheetId !== wanted) saveActiveSheet(projectId, load.sheetId)
+      return
+    }
   }, [adopt, adoptLists, projectId])
+
+  /** `reread` after a refused write, whose failure is already on screen. */
+  const reloadQuietly = useCallback(() => {
+    // A read that fails here leaves the screen as it is; the next action, Retry or reload tries again.
+    reread().catch(() => undefined)
+  }, [reread])
+
+  /** The `reload` in flight, which a second call joins rather than reading twice. */
+  const reloadRef = useRef<Promise<void> | null>(null)
+
+  const reload = useCallback((): Promise<void> => {
+    if (reloadRef.current) return reloadRef.current
+    // Before the first read there is nothing to read again; a failed first read has Retry.
+    if (statusRef.current !== 'ready') return Promise.resolve()
+    setReloading(true)
+    const run = reread().finally(() => {
+      reloadRef.current = null
+      setReloading(false)
+    })
+    reloadRef.current = run
+    return run
+  }, [reread])
 
   const fail = useCallback(
     (cause: unknown) => {
@@ -673,7 +713,7 @@ export function useEstimate(
   const retry = useCallback(() => {
     const current = activeRef.current
     if (statusRef.current === 'ready' && current.error !== undefined) openSheet(current.id)
-    else setReload((count) => count + 1)
+    else setRetries((count) => count + 1)
   }, [openSheet])
 
   /** Applies a change to one sheet document, locally now and on the server (read-modify-write). */
@@ -1082,6 +1122,8 @@ export function useEstimate(
       retry,
       failure,
       loads,
+      reload,
+      reloading,
       lang,
       setLang,
       t,
@@ -1145,6 +1187,8 @@ export function useEstimate(
       pasteCode,
       priced,
       readOnly,
+      reload,
+      reloading,
       renameSheet,
       renameWorkPackage,
       retry,

@@ -136,13 +136,13 @@ h3 {
 
 /* position: relative is required: vim-web pins its canvas to inset:0 here.
    isolation keeps vim-web's own z-index scale (its --z-modal is 40) inside the
-   pane, so the DS menus, dialogs and toasts on document.body stay on top. */
+   pane, so the DS menus, dialogs and toasts on document.body stay on top. Its
+   background is VIEWER_BACKGROUND in ViewerPane.tsx, one colour with the renderer's. */
 .viewer-pane {
   position: relative;
   flex: 1;
   min-width: 0;
   isolation: isolate;
-  background: var(--stage-950);
 }
 
 /* Floats over the canvas, out of the way of vim-web's own control bar. The DS

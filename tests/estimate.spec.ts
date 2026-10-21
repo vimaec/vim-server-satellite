@@ -133,6 +133,24 @@ function writeCalls(mock: MockHandle): string[] {
   return mock.calls.filter((call) => !call.startsWith('GET '))
 }
 
+/** Another user's write, straight into the mock's store: the page is not told. */
+function writeBehindTheBack<T extends object>(
+  mock: MockHandle,
+  namespace: string,
+  key: string,
+  change: (value: T) => T,
+): void {
+  const bucket = mock.store.get(namespace)
+  const entry = bucket?.get(key)
+  if (!bucket || !entry) throw new Error(`No ${namespace}/${key} in the mock store`)
+  bucket.set(key, { value: change(entry.value as T), version: entry.version + 1 })
+}
+
+/** How many times the page listed a namespace (a whole read, not one entry). */
+function listReads(mock: MockHandle, namespace: string): number {
+  return mock.calls.filter((call) => call === `GET /project/p-tiny/data/${namespace}`).length
+}
+
 /**
  * A project somebody already estimated. Sheet "Base" (sheet-1) prices two
  * elements with a count code: (1000 × 1.1) + (0.5 × 400) = 1300 each, one with
@@ -770,6 +788,153 @@ test.describe('estimate', () => {
     await expect.poll(reads).toBeGreaterThan(readsBefore)
     expect(mock.entry(SHEET_1, wall.key)).toBeUndefined()
     expect(writesTo(mock, SHEET_1)).toEqual([])
+  })
+
+  test('a refresh picks up what changed on the server, also for a Viewer', async ({ page }) => {
+    const orgs = defaultOrgs()
+    orgs[0].projects[0].role = 'Viewer'
+    const mock = await openEstimate(page, { orgs, data: await seededData() })
+    const wall2 = await fixtureElement(WALL_2)
+    const refresh = page.getByTestId('estimate-refresh')
+    await expect(refresh).toBeEnabled()
+    await expect(refresh).toHaveAttribute('aria-label', 'Reload from VIM Server')
+    await expect(page.getByTestId('total-value')).toHaveText('$ 3,180')
+
+    // Somebody else changes the price of a code, renames a work package, renames the sheet and
+    // raises a markup, and gives an element a bigger extra.
+    writeBehindTheBack<{ price: number }>(mock, CODES, 'code-unit', (code) => ({ ...code, price: 2000 }))
+    writeBehindTheBack<{ en: string }>(mock, PACKAGES, 'wp-shell', (wp) => ({ ...wp, en: 'Envelope' }))
+    writeBehindTheBack<{ name: string; markups: StoredMarkup[] }>(mock, SHEETS, 'sheet-1', (sheet) => ({
+      ...sheet,
+      name: 'Base (revised)',
+      markups: sheet.markups.map((markup) => (markup.id === 'risk' ? { ...markup, pct: 15 } : markup)),
+    }))
+    writeBehindTheBack<{ extra: number }>(mock, SHEET_1, wall2.key, (entry) => ({ ...entry, extra: 150 }))
+    const loads = (await estimate(page))?.loads ?? 0
+
+    await refresh.click()
+    await expect.poll(async () => (await estimate(page))?.loads).toBe(loads + 1)
+    // (2000 × 1.1 + 200) × 2 + 150 = 4950; × 1.3 = 6435.
+    await expect(page.getByTestId('direct-cost')).toHaveText('Direct cost $ 4,950')
+    await expect(page.getByTestId('total-value')).toHaveText('$ 6,435')
+    await expect(page.getByTestId('sheet-select')).toHaveText('Base (revised)')
+    await expect(page.getByTestId('tree-row').filter({ hasText: 'Envelope' }).first()).toBeVisible()
+    expect((await estimate(page))?.assignments[wall2.key]).toMatchObject({ extra: 150 })
+    await expect(refresh).toBeEnabled()
+
+    // The sheet on screen is deleted elsewhere: the refresh falls back to the first sheet.
+    await pick(page, page.getByTestId('sheet-select'), 'sheet-2')
+    await waitForSheet(page)
+    // WALL by length 4 × 100 = 400, WINDOW at the new price 2400.
+    await expect(page.getByTestId('total-value')).toHaveText('€ 2,800')
+    mock.store.get(SHEETS)?.delete('sheet-2')
+    mock.store.delete(SHEET_2)
+    await refresh.click()
+    await expect.poll(async () => (await estimate(page))?.sheetId).toBe('sheet-1')
+    expect((await estimate(page))?.sheets.map((sheet) => sheet.id)).toEqual(['sheet-1'])
+    await expect(page.getByTestId('sheet-select')).toHaveText('Base (revised)')
+    await expect(page.getByTestId('total-value')).toHaveText('$ 6,435')
+
+    // A refresh is a read: a Viewer may use it, and it writes nothing.
+    expect(writeCalls(mock)).toEqual([])
+  })
+
+  test('a refresh waits for an edit still being written and does not drop it', async ({ page }) => {
+    let holdEntry = false
+    let holdList = false
+    let held: 'entry' | 'list' | null = null
+    let release = (): void => undefined
+    const hold = (which: 'entry' | 'list'): Promise<void> => {
+      held = which
+      return new Promise<void>((resolve) => {
+        release = resolve
+      })
+    }
+    const mock = await openEstimate(page, {
+      data: await seededData(),
+      holdRead: ({ namespace, key }) => {
+        // A markup change reads the sheet entry before it writes it: holding that read holds the write.
+        if (holdEntry && namespace === SHEETS && key === 'sheet-1') {
+          holdEntry = false
+          return hold('entry')
+        }
+        // The refresh's list of the sheet's assignments, with the entries of when it was asked for.
+        if (holdList && namespace === SHEET_1 && key === undefined) {
+          holdList = false
+          return hold('list')
+        }
+        return undefined
+      },
+    })
+    const wall2 = await fixtureElement(WALL_2)
+    const refresh = page.getByTestId('estimate-refresh')
+    const loadsNow = async (): Promise<number> => (await estimate(page))?.loads ?? 0
+
+    // An edit whose write is still out when the refresh is asked for.
+    holdEntry = true
+    const risk = page.locator('[data-testid="markup-row"][data-id="risk"]').getByTestId('markup-pct')
+    await risk.fill('15')
+    await risk.press('Enter')
+    await expect.poll(() => held).toBe('entry')
+    const loads = await loadsNow()
+    const sheetLists = listReads(mock, SHEETS)
+    await refresh.click()
+
+    // The refresh waits for that write: it is busy, and it has not read anything yet.
+    await expect(refresh).toBeDisabled()
+    await expect(page.getByTestId('estimate-reloading')).toHaveText('Reloading…')
+    expect(listReads(mock, SHEETS)).toBe(sheetLists)
+
+    // Once the write is through the refresh reads, after it, and what it reads holds the edit.
+    release()
+    await expect.poll(loadsNow).toBe(loads + 1)
+    await expect(refresh).toBeEnabled()
+    await expect(page.getByTestId('estimate-reloading')).toHaveCount(0)
+    expect(mock.entry(SHEETS, 'sheet-1')).toMatchObject({
+      markups: [
+        { id: 'misc', pct: 15 },
+        { id: 'risk', pct: 15 },
+      ],
+    })
+    expect(mock.calls.lastIndexOf(`GET /project/p-tiny/data/${SHEETS}`)).toBeGreaterThan(
+      mock.calls.indexOf(`PUT /project/p-tiny/data/${SHEETS}/sheet-1`),
+    )
+    await expect(risk).toHaveValue('15.00')
+    // 2650 × 1.3 = 3445.
+    await expect(page.getByTestId('total-value')).toHaveText('$ 3,445')
+
+    // An edit made while the refresh's read is out: that read is older than the screen, so it is
+    // not taken in but made again after the edit's write, and the edit stays.
+    held = null
+    holdList = true
+    const assignmentLists = listReads(mock, SHEET_1)
+    await refresh.click()
+    await expect.poll(() => held).toBe('list')
+    await selectElement(page, WALL_2)
+    const note = elementRow(page, WALL_2).getByTestId('row-note')
+    await note.fill('checked')
+    await note.press('Enter')
+    await expect.poll(() => mock.entry(SHEET_1, wall2.key)).toMatchObject({ code: 'code-unit', note: 'checked' })
+    release()
+    await expect.poll(loadsNow).toBe(loads + 2)
+    await expect(refresh).toBeEnabled()
+    // Two reads, one taken in: the held one was dropped.
+    expect(listReads(mock, SHEET_1)).toBe(assignmentLists + 2)
+    expect((await estimate(page))?.assignments[wall2.key]).toMatchObject({ note: 'checked', extra: 50 })
+    await expect(note).toHaveValue('checked')
+  })
+
+  test('the 3D view is VIM navy before and after the model loads', async ({ page }) => {
+    await installMockVimServer(page)
+    await useFakeSession(page)
+    await page.goto('/?project=p-tiny')
+    const pane = page.getByTestId('viewer-pane')
+    // The pane carries the colour, so it shows before the viewer draws anything.
+    await expect(pane).toHaveCSS('background-color', 'rgb(18, 41, 59)')
+    await waitForEstimate(page)
+    // And vim-web's renderer clears to it, with the model in view.
+    expect(await page.evaluate(() => window.__vimSatellite?.getViewerBackground())).toBe('#12293b')
+    await expect(pane).toHaveCSS('background-color', 'rgb(18, 41, 59)')
   })
 
   test('Cost Details steps through the selection without changing it', async ({ page }) => {

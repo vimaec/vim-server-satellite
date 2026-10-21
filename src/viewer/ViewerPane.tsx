@@ -9,10 +9,33 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as VIM from 'vim-web'
+import { setDebugViewerBackground } from '../debug'
 
 type ViewerApi = VIM.React.Webgl.ViewerApi
 type IWebglVim = VIM.Core.Webgl.IWebglVim
 type IWebglLoadRequest = VIM.Core.Webgl.IWebglLoadRequest
+
+/**
+ * The 3D view's background (VIM navy). It is vim-web's renderer clear colour,
+ * set once at creation (core setting `background.color`); nothing in vim-web
+ * sets it again, and its settings panel neither shows nor stores it. The pane
+ * is painted with it too, so the view has it before the viewer exists.
+ */
+const VIEWER_BACKGROUND = '#12293b'
+
+/**
+ * VIEWER_BACKGROUND for the renderer. vim-web writes the background to the
+ * screen as it holds it, with no linear-to-sRGB step, so the colour is given
+ * with its sRGB values as they are (as vim-web's own default is). Parsed as
+ * sRGB, `new Color('#12293b')`, it would be converted to linear and drawn
+ * almost black.
+ */
+function rendererBackground(): VIM.THREE.Color {
+  return new VIM.THREE.Color().setStyle(VIEWER_BACKGROUND, VIM.THREE.LinearSRGBColorSpace)
+}
+
+/** The pane's own paint, for the moments before the canvas draws. */
+const PANE_STYLE = { background: VIEWER_BACKGROUND } as const
 
 /** What `viewer-status` reports. */
 export type ViewerStatus = 'idle' | 'loading' | 'loaded' | 'error'
@@ -183,20 +206,31 @@ export function ViewerPane({
     const host = hostRef.current
     if (!host) return undefined
 
-    const viewer = await VIM.React.Webgl.createViewer(host, {
-      // The app draws its own tree and estimate panel, so the built-in panels
-      // are off. Local storage is off too: a persisted setting from the built-in
-      // settings panel would otherwise override what is passed here.
-      ui: { panelBimTree: false, panelBimInfo: false, miscProjectInspector: false },
-      isolation: { autoIsolate: false },
-      capacity: { canReadLocalStorage: false },
-    })
+    const viewer = await VIM.React.Webgl.createViewer(
+      host,
+      {
+        // The app draws its own tree and estimate panel, so the built-in panels
+        // are off. Local storage is off too: a persisted setting from the built-in
+        // settings panel would otherwise override what is passed here.
+        ui: { panelBimTree: false, panelBimInfo: false, miscProjectInspector: false },
+        isolation: { autoIsolate: false },
+        capacity: { canReadLocalStorage: false },
+      },
+      { background: { color: rendererBackground() } },
+    )
     if (!hostRef.current) {
       // Unmounted while createViewer was awaiting.
       viewer.dispose()
       return undefined
     }
     viewerRef.current = viewer
+    setDebugViewerBackground(() => {
+      const background = viewer.core.renderer.background
+      // Read back the way it was given (see rendererBackground): the values that reach the screen.
+      return background instanceof VIM.THREE.Color
+        ? `#${background.getHexString(VIM.THREE.LinearSRGBColorSpace)}`
+        : null
+    })
 
     const unsubSelection = viewer.core.selection.onSelectionChanged.sub(() => {
       if (applyingSelfRef.current) return
@@ -382,6 +416,7 @@ export function ViewerPane({
       loadIdRef.current++
       unsubRef.current?.()
       unsubRef.current = undefined
+      setDebugViewerBackground(null)
       viewerRef.current?.dispose()
       viewerRef.current = undefined
       vimRef.current = undefined
@@ -395,7 +430,7 @@ export function ViewerPane({
   return (
     // position: relative is required — createViewer pins the div it is given to
     // inset: 0, so without a positioned wrapper the canvas covers the whole app.
-    <div className="viewer-pane" data-testid="viewer-pane">
+    <div className="viewer-pane" data-testid="viewer-pane" style={PANE_STYLE}>
       <div ref={hostRef} />
       <div className="viewer-status" data-testid="viewer-status" data-state={shownStatus}>
         {message}

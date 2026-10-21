@@ -1,6 +1,7 @@
 /**
- * The left panel: "Estimate" with the EN / 日本語 switch in its head, the
- * Elements and Cost Codes tabs, and the markups + TOTAL foot (estimate.html).
+ * The left panel: "Estimate" with a reload and the EN / 日本語 switch in its
+ * head, the Elements and Cost Codes tabs, and the markups + TOTAL foot
+ * (estimate.html).
  *
  * Until the estimate has been read it shows that it is loading, or why it
  * could not be read with a Retry; the same for the active sheet after a
@@ -8,7 +9,7 @@
  * disabled, and a banner says why.
  */
 import { useState } from 'react'
-import { Banner, Empty, Panel, Segmented, TabPanel, Tabs } from '../../ds'
+import { Banner, Empty, IconButton, Panel, Segmented, TabPanel, Tabs, toast } from '../../ds'
 import type { Lang } from '../types'
 import { CostCodesTab } from './CostCodesTab'
 import { useEstimateUi } from './context'
@@ -41,11 +42,36 @@ export function EstimatePanel({ modelPlaceholder }: EstimatePanelProps): JSX.Ele
             : undefined)
 
   const ready = est.status === 'ready'
+
+  /**
+   * Other people's changes are not pushed to this page (there is no polling),
+   * so the user asks for them. Success needs no toast: the panel shows the
+   * data. A failure keeps the screen as it was and says why, as a refused
+   * write does.
+   */
+  const reload = (): void => {
+    est.reload().catch((cause: unknown) => {
+      const error = cause instanceof Error ? cause.message : String(cause)
+      toast(t('Could not reload the estimate: {error}', { error }), 'bad', 8000)
+    })
+  }
+
   return (
     <Panel
       side="left"
       fill
       title={NAME}
+      titleTools={
+        <IconButton
+          icon="refresh"
+          tip={t('Reload from VIM Server')}
+          disabled={!ready || est.reloading}
+          onClick={reload}
+          data-testid="estimate-refresh"
+        />
+      }
+      // The DS way to say a panel is busy: a live caption beside the title, never a spinner.
+      subtitle={est.reloading ? <span data-testid="estimate-reloading">{t('Reloading…')}</span> : undefined}
       className="en-panel"
       bodyClassName="en-body"
       data-testid="estimate-panel"
