@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../auth/AuthProvider'
 import { listAccessibleProjects, type OrgProjects } from '../api/vimServer'
 import type { BlobSummary } from '../api/types'
+import { Banner, Button, Card, Chip, Empty, Label, cx } from '../ds'
 import { formatDate } from '../format'
 
 /** "3.2 MB", for the snapshot line under a project name. */
@@ -42,61 +43,67 @@ export function ProjectPickerPage({ onOpen }: { onOpen: (projectId: string) => v
   return (
     <main className="page" data-testid="project-picker">
       <header className="topbar">
-        <h1>Projects</h1>
+        <Label as="h1" variant="title">
+          Projects
+        </Label>
         <div className="topbar-right">
-          <span className="user" data-testid="user-name">
+          <Label className="user" variant="dim" truncate data-testid="user-name">
             {auth.session?.name ?? ''}
-          </span>
-          <button type="button" data-testid="sign-out" onClick={auth.signOut}>
+          </Label>
+          <Button variant="ghost" data-testid="sign-out" onClick={auth.signOut}>
             Sign out
-          </button>
+          </Button>
         </div>
       </header>
 
       <div className="scroll">
-        {error ? (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {!groups && !error ? <p className="muted">Loading projects…</p> : null}
-        {groups?.length === 0 ? <p className="muted">You are not a member of any organisation.</p> : null}
+        <div className="picker">
+          {error ? (
+            <Banner tone="bad" role="alert">
+              {error}
+            </Banner>
+          ) : null}
+          {!groups && !error ? <Label variant="dim">Loading projects…</Label> : null}
+          {groups?.length === 0 ? <Empty title="You are not a member of any organisation." /> : null}
 
-        {groups?.map((group) => (
-          <section className="org" key={group.org.id} data-testid="org-group" data-org-id={group.org.id}>
-            <h2>
-              {group.org.name} <span className="muted small">{group.org.role}</span>
-            </h2>
-            {group.projects.length === 0 ? (
-              <p className="muted small">No projects.</p>
-            ) : (
-              <ul className="projects">
-                {group.projects.map((project) => {
-                  const vim = project.latestVim
-                  return (
-                    <li key={project.id}>
-                      <button
-                        type="button"
-                        className="project"
-                        data-testid="project-item"
-                        data-project-id={project.id}
-                        aria-disabled={vim ? undefined : true}
-                        disabled={!vim}
-                        onClick={() => onOpen(project.id)}
-                      >
-                        <span className="project-name">{project.name}</span>
-                        <span className="muted small">
-                          {vim ? snapshotLine(vim) : 'No VIM yet'}
-                        </span>
-                        <span className="badge">{project.role}</span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </section>
-        ))}
+          {groups?.map((group) => (
+            <Card
+              key={group.org.id}
+              title={group.org.name}
+              titleAs="h2"
+              sub={group.org.role}
+              data-testid="org-group"
+              data-org-id={group.org.id}
+            >
+              {group.projects.length === 0 ? (
+                <Label variant="dim">No projects.</Label>
+              ) : (
+                <ul className="ds-list ds-list--selectable projects">
+                  {group.projects.map((project) => {
+                    const vim = project.latestVim
+                    return (
+                      <li key={project.id}>
+                        <button
+                          type="button"
+                          className={cx('ds-list__item project', !vim && 'ds-list__item--dim')}
+                          data-testid="project-item"
+                          data-project-id={project.id}
+                          aria-disabled={vim ? undefined : true}
+                          disabled={!vim}
+                          onClick={() => onOpen(project.id)}
+                        >
+                          <span className="ds-list__label">{project.name}</span>
+                          <span className="ds-list__meta">{vim ? snapshotLine(vim) : 'No VIM yet'}</span>
+                          <Chip>{project.role}</Chip>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </Card>
+          ))}
+        </div>
       </div>
     </main>
   )

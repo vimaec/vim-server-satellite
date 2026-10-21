@@ -3,6 +3,7 @@ import { getProject, getProjectRole, getVimDownloadUrl, getVimHistory } from '..
 import type { BlobSummary } from '../api/types'
 import { useAuth } from '../auth/AuthProvider'
 import { setDebugAssignments, setDebugColors, setDebugSelection } from '../debug'
+import { Button, Chip, Label } from '../ds'
 import { formatDateTime } from '../format'
 import { labelColors } from '../labels/colors'
 import { LabelPanel } from '../labels/LabelPanel'
@@ -165,29 +166,27 @@ export function ProjectPage({
   return (
     <main className="page" data-testid="project-page">
       <header className="topbar">
-        <button type="button" data-testid="back-to-projects" onClick={onBack}>
-          ← Projects
-        </button>
-        <h1 data-testid="project-title">{name || 'Project'}</h1>
+        <Button variant="ghost" icon="back" data-testid="back-to-projects" onClick={onBack}>
+          Projects
+        </Button>
+        <Label as="h1" variant="title" truncate data-testid="project-title">
+          {name || 'Project'}
+        </Label>
         {snapshot ? (
-          <span className="tag" data-testid="snapshot-tag" title={formatDateTime(snapshot.created)}>
+          <Chip data-testid="snapshot-tag" tip={formatDateTime(snapshot.created)}>
             {snapshot.versionTag}
-          </span>
+          </Chip>
         ) : (
-          <span className="tag muted" data-testid="snapshot-tag">
-            {resolving ? '…' : 'no VIM'}
-          </span>
+          <Chip data-testid="snapshot-tag">{resolving ? '…' : 'no VIM'}</Chip>
         )}
-        <span className="badge" data-testid="role-badge">
-          {role || '…'}
-        </span>
+        <Chip data-testid="role-badge">{role || '…'}</Chip>
         <div className="topbar-right">
-          <span className="user" data-testid="user-name">
+          <Label className="user" variant="dim" truncate data-testid="user-name">
             {auth.session?.name ?? ''}
-          </span>
-          <button type="button" data-testid="sign-out" onClick={auth.signOut}>
+          </Label>
+          <Button variant="ghost" data-testid="sign-out" onClick={auth.signOut}>
             Sign out
-          </button>
+          </Button>
         </div>
       </header>
 

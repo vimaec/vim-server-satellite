@@ -1,19 +1,13 @@
-/* Plain CSS, light theme, no framework. Layout is one column: a short header
-   over a flex row that fills whatever is left of the window. */
+/* The app's own rules: LAYOUT ONLY. Every colour, font, border and radius comes
+   from the vim-html-ds tokens in src/ds/ds.css (dark theme; <body class="ds-root">
+   sets the page fill and base type). Layout is one column: a top bar over a
+   flex row that fills whatever is left of the window. */
 
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --border: #d8dce2;
-  --text: #1b1f24;
-  --muted: #6b7280;
-  --accent: #1f6feb;
-  --error: #c02a2a;
-  --radius: 6px;
-}
-
-* {
-  box-sizing: border-box;
+  /* The top bar height. The DS toaster reads --vf-titlebar-h to sit below the
+     host's title bar; here that bar is ours. */
+  --app-topbar-h: 40px;
+  --vf-titlebar-h: var(--app-topbar-h);
 }
 
 html,
@@ -23,107 +17,22 @@ body,
   margin: 0;
 }
 
-body {
-  font:
-    14px/1.45 system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-  color: var(--text);
-  background: var(--bg);
-}
-
-h1 {
-  font-size: 15px;
-  font-weight: 600;
+/* Headings keep their meaning; the DS label classes give them their look. */
+h1,
+h2,
+h3 {
   margin: 0;
 }
 
-h2 {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0 0 6px;
-}
-
-p {
-  margin: 0 0 10px;
-}
-
-.muted {
-  color: var(--muted);
-}
-
-.small {
-  font-size: 12px;
-}
-
-.error {
-  color: var(--error);
-}
-
-/* --- buttons ------------------------------------------------------------ */
-
-button {
-  font: inherit;
-  color: inherit;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  border-color: #b9c0c9;
-}
-
-button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-button.primary {
-  color: #fff;
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-/* --- sign-in ------------------------------------------------------------ */
+/* --- page frame --------------------------------------------------------- */
 
 .centered {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
-  padding: 20px;
+  padding: var(--ds-space-5);
 }
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 380px;
-  padding: 22px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-}
-
-.card p {
-  margin: 0;
-}
-
-input {
-  font: inherit;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-/* --- page frame --------------------------------------------------------- */
 
 .page {
   display: flex;
@@ -135,77 +44,86 @@ input {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  gap: var(--ds-space-2);
+  height: var(--app-topbar-h);
+  padding: 0 var(--ds-space-3);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--stage-900);
+}
+
+/* A long project name gives way before the chips and the user menu do. */
+.topbar > .ds-label--title {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .topbar-right {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 10px;
+  gap: var(--ds-space-2);
   margin-left: auto;
 }
 
 .user {
-  font-size: 12px;
-  color: var(--muted);
   max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tag,
-.badge {
-  padding: 1px 7px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.badge {
-  color: var(--muted);
 }
 
 .scroll {
   flex: 1;
   overflow: auto;
-  padding: 16px;
+  padding: var(--ds-space-4);
+}
+
+/* --- sign-in ------------------------------------------------------------ */
+
+.signin-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.signin-card p {
+  margin: 0;
 }
 
 /* --- project picker ----------------------------------------------------- */
 
-.org {
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
   max-width: 720px;
-  margin: 0 0 18px;
 }
 
 .projects {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* Each row is a real <button> (a disabled project must be a disabled control),
+   so the browser's button look comes off and ds-list__item's takes over. The
+   hairline goes between list items: the button is the only child of its <li>,
+   so ds-list's own :last-child rule would drop every line. */
 .project {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   width: 100%;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  line-height: inherit;
   text-align: left;
 }
 
-.project-name {
-  font-weight: 500;
+.projects > li:not(:last-child) > .project {
+  border-bottom: 1px solid var(--hairline);
 }
 
-.project .badge {
-  margin-left: auto;
+.project:disabled {
+  cursor: default;
+}
+
+.ds-list--selectable .project:disabled:hover {
+  background: transparent;
 }
 
 /* --- project panes ------------------------------------------------------ */
@@ -214,6 +132,106 @@ input {
   display: flex;
   flex: 1;
   min-height: 0;
+}
+
+/* position: relative is required: vim-web pins its canvas to inset:0 here.
+   isolation keeps vim-web's own z-index scale (its --z-modal is 40) inside the
+   pane, so the DS menus, dialogs and toasts on document.body stay on top. */
+.viewer-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  isolation: isolate;
+  background: var(--stage-950);
+}
+
+/* Floats over the canvas, out of the way of vim-web's own control bar. The DS
+   banner language: a flat fill with a cyan keyline, red for an error. */
+.viewer-status {
+  position: absolute;
+  top: var(--ds-space-2);
+  left: var(--ds-space-2);
+  z-index: 20;
+  max-width: calc(100% - 2 * var(--ds-space-2));
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--vim-cyan);
+  background: var(--stage-800);
+  color: var(--text-200);
+  font-size: var(--ds-fs-label);
+}
+
+.viewer-status[data-state='error'] {
+  border-left-color: var(--bad);
+}
+
+/* Once the model is on screen the status has nothing left to say, and it would
+   sit on top of the viewer's own logo. */
+.viewer-status[data-state='loaded'] {
+  display: none;
+}
+
+/* === Legacy: element tree + label panel ===================================
+   These rules serve src/tree and src/labels, which the Estimate port removes;
+   they go with them. The old light-theme names now point at DS tokens, and the
+   bare element rules are scoped to the side pane with :where() (zero
+   specificity) so they cannot reach the DS controls anywhere else. */
+
+.side-pane {
+  --bg: var(--stage-800);
+  --surface: var(--stage-900);
+  --border: var(--hairline);
+  --text: var(--text-100);
+  --muted: var(--text-400);
+  --accent: var(--vim-cyan-700);
+  --error: var(--bad);
+  --radius: var(--ds-radius-btn);
+}
+
+:where(.side-pane) h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+:where(.side-pane) p {
+  margin: 0 0 10px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 12px;
+}
+
+:where(.side-pane) button {
+  font: inherit;
+  color: inherit;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+:where(.side-pane button:hover:not(:disabled)) {
+  border-color: var(--hairline-soft);
+}
+
+:where(.side-pane button:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+:where(.side-pane) input {
+  font: inherit;
+  color: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
 /* The side pane is a column: the tree takes the space that is left, the label
@@ -225,40 +243,6 @@ input {
   min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--surface);
-}
-
-/* position: relative is required: vim-web pins its canvas to inset:0 here. */
-.viewer-pane {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  background: #e9ecef;
-}
-
-/* Floats over the canvas, out of the way of vim-web's own control bar. */
-.viewer-status {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 20;
-  max-width: calc(100% - 16px);
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgb(255 255 255 / 88%);
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.viewer-status[data-state='error'] {
-  border-color: var(--error);
-  color: var(--error);
-}
-
-/* Once the model is on screen the pill has nothing left to say, and it would
-   sit on top of the viewer's own logo. */
-.viewer-status[data-state='loaded'] {
-  display: none;
 }
 
 /* --- element tree ------------------------------------------------------- */

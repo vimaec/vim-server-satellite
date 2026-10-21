@@ -108,3 +108,14 @@ export async function deleteEntries(
     { ...jsonBody(keys), method: 'POST' },
   )
 }
+
+/**
+ * Deletes a whole namespace and every entry in it, in one call.
+ *
+ * A 404 counts as done: the goal is "this namespace holds nothing", and a
+ * namespace that never had an entry (or that someone else already deleted)
+ * meets it.
+ */
+export async function deleteNamespace(projectId: string, namespace: string): Promise<void> {
+  await apiRequest(namespacePath(projectId, namespace), { method: 'DELETE', allowStatus: [404] })
+}
