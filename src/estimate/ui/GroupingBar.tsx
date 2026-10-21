@@ -34,6 +34,7 @@ export function GroupStrip({ t, nesting, drawerOpen, onDrawerOpen }: GroupingBar
         ))}
         <span className="en-strip__leaf">· {t('Element ID')}</span>
       </div>
+      {/* "menu", as the original workflow: the DS icon set has no settings / options glyph. */}
       <IconButton
         icon="menu"
         size="sm"

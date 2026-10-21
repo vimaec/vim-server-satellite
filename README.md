@@ -30,7 +30,7 @@ Live build: <https://vimaec.github.io/vim-server-satellite/>
 | Pricing, totals, the cost colour ramp and the palette by grouping level, as pure functions | `src/estimate/pricing.ts` |
 | A virtualized, grouped element tree that drives and follows the 3D selection | `src/estimate/grouping.ts`, `src/estimate/ui/ElementTree.tsx`, `src/estimate/ui/VirtualTree.tsx` |
 | Excluded elements hidden in 3D, data colours applied per element, a right-click menu over the viewer | `src/viewer/ViewerPane.tsx`, `src/estimate/ui/menus.ts` |
-| Read-only mode for the project `Viewer` role | `src/estimate/useEstimate.ts`, `src/estimate/ui/` |
+| Read-only mode for every project role but `Manager` and `Admin` | `src/estimate/useEstimate.ts`, `src/estimate/ui/` |
 | The vim-html-ds design system as plain CSS plus React twins of its components | `src/ds/` |
 | End-to-end tests against a full in-browser mock of VIM Server, then a Pages deploy | `tests/support/mockVimServer.ts`, `.github/workflows/pages.yml` |
 
@@ -204,7 +204,8 @@ What a user does in the panel left of the viewer (`src/estimate/ui/`):
 - **Cost Details.** A pane right of the viewer: a summary of the selection, and a navigator that
   steps through the selected elements one at a time without changing the selection. The camera can
   follow the element shown.
-- **EN / 日本語.** The language switch in the panel head.
+- **EN / 日本語.** The language switch in the panel head. It also translates the project page's top
+  bar and the viewer's status line; the sign-in and project picker pages stay in English.
 
 Per-user view settings stay in this browser's `localStorage`, under `vimSatellite.estimate.*`: the
 language, the active sheet per project, the grouping, the Display mode and its shuffle seed, and the
@@ -246,8 +247,10 @@ the app takes that as "it exists" and writes into it.
   read–modify–write (`updateSheet()`): read the entry with its `ETag` — a quoted integer
   write-version, for example `"3"` — apply the change to what is *stored*, and write it back with
   `If-Match`. A `412` means somebody else wrote first: the cycle runs again over their version, up
-  to three times, and the app then shows the merged sheet. So one user who changes a markup while
-  another renames the sheet does not undo the rename.
+  to three times, and the app then shows the sheet as stored, other people's changes included.
+  The change itself is one operation, never "this page's copy of the list": rename, set the
+  currency, add a markup, change one markup (by id), delete one markup (by id). So one user who
+  changes Risk while another adds an Insurance markup or renames the sheet undoes neither.
 - **Cost codes, work packages and assignments** are one entry per thing and last-write-wins: one user
   who prices a wall does not conflict with another who prices a door. Assignment changes made within
   40 ms of each other go out as one batch (`PUT /data/{ns}` for upserts, `POST /data/{ns}/delete`
@@ -256,8 +259,17 @@ the app takes that as "it exists" and writes into it.
 - All writes go through **one serial queue**, in the order the user made them: a new cost code
   reaches the server before the assignments that use it, a new sheet before its assignments.
 - Writes are **optimistic**: the screen changes first. When the server refuses a write, the change is
-  taken back, a toast says why, and the whole estimate is read again from the server. There is no
-  polling: the data is read when the project opens, after a failed write, and on Retry.
+  taken back, a toast says why, and the whole estimate is read again from the server. That read is
+  only taken in when no edit was made while it was out; otherwise it runs again after that edit's
+  write, so an older read never takes a newer edit off the screen (the next edit of that element
+  would then write the stale entry back). There is no polling: the data is read when the project
+  opens, after a failed write, and on Retry.
+- **Switching sheets.** The hook holds the active sheet's id and its assignments as one value, and
+  takes assignment writes only while that value has the assignments of that sheet. A switch drops
+  the previous sheet's assignments at once and reads the new sheet's: until they arrive the tree
+  says the sheet is loading and every input is disabled, and if the read fails the panel says so
+  with a Retry (the sheet select still works, to go back). An edit can never land in a sheet other
+  than the one it was made on.
 
 **Delete order.** A sheet: its `estimate.sheet.<id>` namespace first (`DELETE /data/{ns}`), then
 its entry in `estimate.sheets`, so a sheet never points at data that is gone. The last sheet cannot
@@ -266,11 +278,13 @@ sheet — it reads the sheet list again, so a sheet that someone else added is c
 then deletes its entry. Duplicate creates the new sheet entry (create-only) with the source's
 markups and currency, then copies the assignments with a batch upsert.
 
-**Roles.** Writes need `Manager` or `Admin` on the project. With `Viewer` the panel says it is
-read-only, every input is disabled, and the menus show the write verbs disabled, because a write
+**Roles.** Writes need `Manager` or `Admin` on the project (`canWriteRole()`, an allow-list: a role
+the app does not know reads only). With any other role the panel says it is read-only and names
+the role, every input is disabled, and the menus show the write verbs disabled, because a write
 would come back `403`. The role comes from `GET /project/{id}/role`, and if that call fails the app
 assumes the lowest privilege rather than failing the page. Until the estimate and the role are both
-known, nothing is written.
+known, nothing is written. The project page is keyed by the project id, so a role never carries
+over from one project to the next.
 
 ### Quantities from the BIM tables
 
@@ -415,7 +429,9 @@ What the mock (`tests/support/mockVimServer.ts`) provides:
   batch upsert, batch delete and namespace delete, plus a record of every write, so a test can
   assert what was actually sent. `data` seeds the store; `beforeEntryWrite` lets a test act as
   another writer between the app's read and its write; `failWrite` answers chosen writes with an
-  error status (for example `500`) to test the rollback.
+  error status (for example `500`) to test the rollback; `failRead` does the same for reads, and
+  `holdRead` holds a read's reply (with the data of when it was asked for) until the test lets it
+  go, so a read can arrive late and out of date.
 - A **Range-capable blob route** on the fake origin `https://mock-blob.local`, serving
   `tests/fixtures/Tiny_House_Imperial.r2026.vim` (252 KB) with exact `206` / `Content-Range` /
   `Content-Length` / `Accept-Ranges` replies, and the CORS headers blob storage exposes. The vim-web
@@ -440,7 +456,9 @@ window.__vimSatellite = {
   getElementColor(index): string | undefined    // the applied colour override, '#rrggbb'
   getEstimate():          DebugEstimate | null  // { sheetId, sheets, totals,
                                                 //   assignments: element key -> assignment,
-                                                //   hidden: excluded element indices }
+                                                //   hidden: excluded element indices,
+                                                //   canEdit, sheetStatus: 'loading' | 'ready' | 'error',
+                                                //   loads: whole reads taken in so far }
   isElementHidden(index): boolean               // excluded in the active sheet, so hidden in 3D
 }
 ```
@@ -451,7 +469,7 @@ The specs:
 |---|---|
 | `auth.spec.ts` | Sign-in page, the PKCE reply and its `state` check, Entra errors, sign out, silent refresh, a refused refresh, the `/config` fallback, a `401` while signed in |
 | `projects.spec.ts` | The picker by organisation, a project without a VIM, the project page (title, snapshot, role), `?project=` across a reload, a hidden project, the loading and download-error states |
-| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, the `Viewer` role, a refused write rolled back, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
+| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
 | `estimate-pricing.spec.ts` | The pure functions: pricing, totals and markups, the lump-sum and missing rules, the cost ramp, colours by level, grouping and search, the cost code tree, number parsing |
 | `estimate-quantities.spec.ts` | `readFacts()` on the fixture: metric lengths, areas and volumes, material fallbacks, names from the BIM tables |
 | `mock-server.spec.ts` | The harness itself: Range replies, data store preconditions, the bearer check |

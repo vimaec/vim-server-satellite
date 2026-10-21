@@ -7,7 +7,7 @@
  * control starts on the same vertical line whatever the language.
  */
 import { useState } from 'react'
-import { IconButton, Search, Segmented, Select, confirm, prompt, toast } from '../../ds'
+import { IconButton, Label, Search, Segmented, Select, confirm, prompt, toast } from '../../ds'
 import type { SelectOption } from '../../ds'
 import { LEVEL_LABEL } from '../grouping'
 import { CURRENCIES, amount } from '../i18n'
@@ -33,9 +33,9 @@ export function ElementsTab({ placeholder }: { placeholder?: string }): JSX.Elem
   return (
     <>
       <div className="en-chrome">
-        <span className="en-eyebrow">{t('Estimation sheet')}</span>
+        <Label variant="eyebrow" className="en-eyebrow">{t('Estimation sheet')}</Label>
         <SheetRow />
-        <span className="en-eyebrow">{t('Group by')}</span>
+        <Label variant="eyebrow" className="en-eyebrow">{t('Group by')}</Label>
         <GroupStrip {...grouping} />
         {drawerOpen ? (
           <>
@@ -43,7 +43,7 @@ export function ElementsTab({ placeholder }: { placeholder?: string }): JSX.Elem
             <GroupDrawer {...grouping} />
           </>
         ) : null}
-        <span className="en-eyebrow">{t('Display')}</span>
+        <Label variant="eyebrow" className="en-eyebrow">{t('Display')}</Label>
         <DisplayRow />
       </div>
       <SearchRow onCollapse={open.collapse} onExpand={open.expand} />
@@ -121,7 +121,7 @@ function SheetRow(): JSX.Element {
         data-testid="sheet-select"
       />
       <span className="en-line__end">
-        <span className="en-eyebrow">{t('Currency')}</span>
+        <Label variant="eyebrow" className="en-eyebrow">{t('Currency')}</Label>
         <Select
           className="en-currency"
           options={CURRENCIES.map((entry) => ({ id: entry.id, label: `${entry.id}  ${entry.symbol}` }))}

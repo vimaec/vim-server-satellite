@@ -12,6 +12,7 @@ import type { ReactNode } from 'react'
 import { IconButton, Label, Panel, Select, TextArea, cx } from '../../ds'
 import type { SelectOption } from '../../ds'
 import { categoryLabel, qtyText } from '../i18n'
+import type { Translator } from '../i18n'
 import { costCodeLabel, workPackageName } from '../grouping'
 import { BASIS_UNIT } from '../types'
 import type { ElementFacts, PricedRow } from '../types'
@@ -21,7 +22,15 @@ import { useEstimateUi } from './context'
 /** The navigator's Summary entry: never an element index. */
 const SUMMARY = 'summary'
 const NONE = '+none'
+/** The pager's "… and N more" entry: never an element index. */
+const MORE = '+more'
 const NOTE_MAX = 500
+/**
+ * The pager's dropdown lists this many elements at most: the DS menu renders
+ * every entry, and a 20,000-element selection would freeze it. Previous /
+ * Next still step through all of them.
+ */
+const PAGER_MAX = 200
 
 type Shown = { facts: ElementFacts; row: PricedRow }
 
@@ -33,11 +42,11 @@ function common<T>(rows: Shown[], pick: (shown: Shown) => T): { same: boolean; v
 }
 
 /** ElementId order (numeric where it is a number), as the tree lists them. */
-function byElementId(a: Shown, b: Shown): number {
-  const x = Number(a.facts.elementId)
-  const y = Number(b.facts.elementId)
+function byElementId(a: ElementFacts, b: ElementFacts): number {
+  const x = Number(a.elementId)
+  const y = Number(b.elementId)
   if (Number.isFinite(x) && Number.isFinite(y) && x !== y) return x - y
-  return a.facts.index - b.facts.index
+  return a.index - b.index
 }
 
 export function CostDetails({ onClose }: { onClose: () => void }): JSX.Element {
@@ -45,15 +54,28 @@ export function CostDetails({ onClose }: { onClose: () => void }): JSX.Element {
   const { est, selection } = ui
   const { t } = est
 
-  const rows = useMemo(() => {
-    const out: Shown[] = []
+  // The selected elements in order: changes with the selection, not with every edit.
+  const selectedFacts = useMemo(() => {
+    const out: ElementFacts[] = []
     for (const index of selection) {
       const facts = est.facts.get(index)
-      const row = est.priced.get(index)
-      if (facts && row) out.push({ facts, row })
+      if (facts) out.push(facts)
     }
     return out.sort(byElementId)
-  }, [est.facts, est.priced, selection])
+  }, [est.facts, selection])
+  const rows = useMemo(() => {
+    const out: Shown[] = []
+    for (const facts of selectedFacts) {
+      const row = est.priced.get(facts.index)
+      if (row) out.push({ facts, row })
+    }
+    return out
+  }, [est.priced, selectedFacts])
+  const listed = useMemo(
+    () => (selectedFacts.length > 1 ? [SUMMARY, ...selectedFacts.map((facts) => String(facts.index))] : []),
+    [selectedFacts],
+  )
+  const baseOptions = useMemo(() => pagerOptions(selectedFacts, t), [selectedFacts, t])
 
   // A new selection starts on its summary (or its one element).
   const [shown, setShown] = useState<string>(SUMMARY)
@@ -63,25 +85,19 @@ export function CostDetails({ onClose }: { onClose: () => void }): JSX.Element {
   const summary = rows.length > 1 && shown === SUMMARY
   const current = summary ? null : (rows.find((entry) => String(entry.facts.index) === shown) ?? rows[rows.length - 1])
   const key = current ? String(current.facts.index) : SUMMARY
-  const listed = rows.length > 1 ? [SUMMARY, ...rows.map((entry) => String(entry.facts.index))] : [key]
-  const at = Math.max(0, listed.indexOf(key))
+  const steps = listed.length ? listed : [key]
+  const at = Math.max(0, steps.indexOf(key))
+  // An element past the dropdown's cap still shows as the pager's value.
+  const options =
+    at > PAGER_MAX && current
+      ? [...baseOptions.slice(0, -1), elementOption(current.facts, at, rows.length), ...baseOptions.slice(-1)]
+      : baseOptions
 
   const step = (next: string): void => {
+    if (next === MORE) return
     setShown(next)
     if (frameOnStep && next !== SUMMARY) ui.frameElements([Number(next)])
   }
-
-  const pagerOptions: SelectOption[] = listed.map((id, i) => {
-    if (id === SUMMARY) {
-      return { id, label: t('Summary'), hint: t('({n} elements)', { n: rows.length.toLocaleString() }) }
-    }
-    const entry = rows[rows.length > 1 ? i - 1 : 0]
-    return {
-      id,
-      label: `${entry.facts.elementId}  ${entry.facts.name}`,
-      hint: rows.length > 1 ? `(${i}/${rows.length})` : undefined,
-    }
-  })
 
   return (
     <Panel
@@ -102,19 +118,19 @@ export function CostDetails({ onClose }: { onClose: () => void }): JSX.Element {
             <IconButton
               icon="chevron-left"
               size="sm"
-              tip={listed.length > 1 ? t('Previous') : t('Select more than one element to step between them')}
-              disabled={listed.length < 2}
+              tip={steps.length > 1 ? t('Previous') : t('Select more than one element to step between them')}
+              disabled={steps.length < 2}
               data-testid="details-prev"
-              onClick={() => step(listed[(at - 1 + listed.length) % listed.length])}
+              onClick={() => step(steps[(at - 1 + steps.length) % steps.length])}
             />
             <Select
               block
               className="ed-pagesel"
-              options={pagerOptions}
+              options={options}
               value={key}
               onChange={step}
               title={
-                listed.length > 1
+                steps.length > 1
                   ? t('Step through the {n} selected elements', { n: rows.length.toLocaleString() })
                   : undefined
               }
@@ -123,10 +139,10 @@ export function CostDetails({ onClose }: { onClose: () => void }): JSX.Element {
             <IconButton
               icon="chevron-right"
               size="sm"
-              tip={listed.length > 1 ? t('Next') : t('Select more than one element to step between them')}
-              disabled={listed.length < 2}
+              tip={steps.length > 1 ? t('Next') : t('Select more than one element to step between them')}
+              disabled={steps.length < 2}
               data-testid="details-next"
-              onClick={() => step(listed[(at + 1) % listed.length])}
+              onClick={() => step(steps[(at + 1) % steps.length])}
             />
             <IconButton
               icon="camera"
@@ -147,6 +163,28 @@ export function CostDetails({ onClose }: { onClose: () => void }): JSX.Element {
       )}
     </Panel>
   )
+}
+
+/** One element in the pager: its ElementId and name, and its place in the selection when there are several. */
+function elementOption(facts: ElementFacts, place: number, of: number): SelectOption {
+  return {
+    id: String(facts.index),
+    label: `${facts.elementId}  ${facts.name}`,
+    hint: of > 1 ? `(${place}/${of})` : undefined,
+  }
+}
+
+/** The pager's list: Summary, the first PAGER_MAX elements, and how many more there are. */
+function pagerOptions(selected: ElementFacts[], t: Translator): SelectOption[] {
+  if (selected.length === 0) return []
+  if (selected.length === 1) return [elementOption(selected[0], 1, 1)]
+  const options: SelectOption[] = [
+    { id: SUMMARY, label: t('Summary'), hint: t('({n} elements)', { n: selected.length.toLocaleString() }) },
+    ...selected.slice(0, PAGER_MAX).map((facts, i) => elementOption(facts, i + 1, selected.length)),
+  ]
+  const more = selected.length - PAGER_MAX
+  if (more > 0) options.push({ id: MORE, label: t('… and {n} more', { n: more.toLocaleString() }), disabled: true })
+  return options
 }
 
 /** A read-only line; a value nobody has is not shown. */
@@ -172,7 +210,9 @@ function SummaryView({ rows }: { rows: Shown[] }): JSX.Element {
   return (
     <>
       <div className="ed-facts">
-        <div className="ed-head">{t('{n} elements selected', { n: rows.length.toLocaleString() })}</div>
+        <Label as="div" variant="eyebrow">
+          {t('{n} elements selected', { n: rows.length.toLocaleString() })}
+        </Label>
         <Line label={t('Category')} value={categoryLabel(est.lang, category.value ?? '')} varies={!category.same} />
         <Line label={t('Level')} value={level.value} varies={!level.same} />
       </div>
@@ -198,9 +238,9 @@ function ElementView({ entry }: { entry: Shown }): JSX.Element {
   return (
     <>
       <div className="ed-facts">
-        <div className="ed-head">
+        <Label as="div" variant="eyebrow">
           {t('Element ID')} {facts.elementId}
-        </div>
+        </Label>
         <Line label={t('Name')} value={facts.name} />
         <Line label={t('Category')} value={categoryLabel(est.lang, facts.category)} />
         <Line label={t('Family')} value={facts.family} />

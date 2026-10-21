@@ -2,20 +2,19 @@
  * The panel's foot, always in view (footer.js): the active sheet's markups on
  * the left, the TOTAL on the right. A markup is a named percentage of the
  * direct cost; the total adds them all.
+ *
+ * Each control changes ONE markup, by id: the hook applies that change to the
+ * stored list when it writes, so a markup someone else added or changed in
+ * the meantime is not overwritten by this page's older copy of the list.
  */
 import { Button, IconButton, Input, NumberInput } from '../../ds'
 import { amount } from '../i18n'
-import { newId } from '../types'
-import type { Markup } from '../types'
 import { useEstimateUi } from './context'
 
 export function Footer(): JSX.Element {
   const { est } = useEstimateUi()
   const { t, totals, canEdit } = est
   const markups = est.sheet.markups
-
-  const change = (i: number, patch: Partial<Markup>): void =>
-    est.setMarkups(markups.map((markup, k) => (k === i ? { ...markup, ...patch } : markup)))
 
   return (
     <div className="en-foot" data-testid="footer">
@@ -26,7 +25,7 @@ export function Footer(): JSX.Element {
           <span className="en-num">{t('Amount ¥')}</span>
           <span />
         </div>
-        {markups.map((markup, i) => (
+        {markups.map((markup) => (
           <div key={markup.id} className="en-mrow" data-testid="markup-row" data-id={markup.id}>
             <Input
               value={markup.name}
@@ -35,7 +34,7 @@ export function Footer(): JSX.Element {
               ariaLabel={t('Markups')}
               data-testid="markup-name"
               onCommit={(name) => {
-                if (name.trim()) change(i, { name: name.trim() })
+                if (name.trim()) est.updateMarkup(markup.id, { name })
               }}
             />
             <NumberInput
@@ -47,7 +46,7 @@ export function Footer(): JSX.Element {
               disabled={!canEdit}
               ariaLabel="%"
               data-testid="markup-pct"
-              onChange={(pct) => change(i, { pct: pct ?? 0 })}
+              onChange={(pct) => est.updateMarkup(markup.id, { pct: pct ?? 0 })}
             />
             <span className="en-num">{amount((totals.direct * markup.pct) / 100)}</span>
             <IconButton
@@ -57,7 +56,7 @@ export function Footer(): JSX.Element {
               tip={t('Delete')}
               disabled={!canEdit}
               data-testid="markup-delete"
-              onClick={() => est.setMarkups(markups.filter((_, k) => k !== i))}
+              onClick={() => est.deleteMarkup(markup.id)}
             />
           </div>
         ))}
@@ -67,9 +66,7 @@ export function Footer(): JSX.Element {
             icon="add"
             disabled={!canEdit}
             data-testid="markup-add"
-            onClick={() =>
-              est.setMarkups([...markups, { id: newId('markup'), name: t('New markup'), pct: 0 }])
-            }
+            onClick={() => est.addMarkup(t('New markup'))}
           >
             {t('Add markup')}
           </Button>

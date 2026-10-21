@@ -61,6 +61,11 @@ function selection(page: Page): Promise<number[] | undefined> {
   return page.evaluate(() => window.__vimSatellite?.getSelection())
 }
 
+/** The active sheet's assignments are read: after a switch, edits are only taken once they are. */
+async function waitForSheet(page: Page): Promise<void> {
+  await expect.poll(async () => (await estimate(page))?.sheetStatus).toBe('ready')
+}
+
 /** Submits a search: the tree filters on Enter, and a search opens every group. */
 async function search(page: Page, text: string): Promise<void> {
   const box = page.getByTestId('element-search')
@@ -105,6 +110,9 @@ async function pick(page: Page, select: Locator, value: string): Promise<void> {
 }
 
 // ---- the store ---------------------------------------------------------------------------------
+
+/** A markup as the store holds it in a sheet entry. */
+type StoredMarkup = { id: string; name: string; pct: number }
 
 function writesTo(mock: MockHandle, namespace: string): RecordedWrite[] {
   return mock.writes.filter((write) => write.namespace === namespace)
@@ -429,6 +437,7 @@ test.describe('estimate', () => {
     // Delete the copy: its assignments go with it, the original's stay.
     await pick(page, sheetSelect, copyId)
     await expect(sheetSelect).toHaveText('Base (2)')
+    await waitForSheet(page)
     await pick(page, sheetSelect, '+del')
     await page.getByTestId('dialog-confirm').click()
     await expect.poll(() => mock.entry(SHEETS, copyId)).toBeUndefined()
@@ -531,6 +540,51 @@ test.describe('estimate', () => {
     await expect(page.getByTestId('sheet-select')).toHaveText('Renamed')
   })
 
+  test('two users editing the markups at once both keep their change', async ({ page }) => {
+    // The other user: a change to the stored markups between this page's read of the sheet and
+    // its write, so the page's If-Match is stale and its write is retried over theirs.
+    let other: ((markups: StoredMarkup[]) => StoredMarkup[]) | null = null
+    const mock = await openEstimate(page, {
+      data: await seededData(),
+      beforeEntryWrite: ({ namespace, key }, store) => {
+        const change = other
+        if (!change || namespace !== SHEETS || key !== 'sheet-1') return
+        other = null
+        const entry = store.get(namespace)?.get(key)
+        if (!entry) return
+        const value = entry.value as { markups: StoredMarkup[] }
+        store.get(namespace)?.set(key, { value: { ...value, markups: change(value.markups) }, version: entry.version + 1 })
+      },
+    })
+    const stored = () => (mock.entry(SHEETS, 'sheet-1') as { markups: StoredMarkup[] }).markups
+
+    // They add "Insurance 2 %" while this page raises Risk to 7 %.
+    other = (markups) => [...markups, { id: 'insurance', name: 'Insurance', pct: 2 }]
+    const risk = page.locator('[data-testid="markup-row"][data-id="risk"]').getByTestId('markup-pct')
+    await risk.fill('7')
+    await risk.press('Enter')
+    await expect.poll(stored).toEqual([
+      { id: 'misc', name: 'Miscellaneous', pct: 15 },
+      { id: 'risk', name: 'Risk', pct: 7 },
+      { id: 'insurance', name: 'Insurance', pct: 2 },
+    ])
+    // The page shows the merged list.
+    await expect(page.getByTestId('markup-row')).toHaveCount(3)
+
+    // They lower Miscellaneous to 10 % while this page adds a markup.
+    other = (markups) => markups.map((markup) => (markup.id === 'misc' ? { ...markup, pct: 10 } : markup))
+    await page.getByTestId('markup-add').click()
+    await expect.poll(() => stored().length).toBe(4)
+    expect(stored()).toEqual([
+      { id: 'misc', name: 'Miscellaneous', pct: 10 },
+      { id: 'risk', name: 'Risk', pct: 7 },
+      { id: 'insurance', name: 'Insurance', pct: 2 },
+      { id: expect.stringMatching(/^markup-/), name: 'New markup', pct: 0 },
+    ])
+    await expect(page.getByTestId('markup-row')).toHaveCount(4)
+    await expect.poll(async () => (await estimate(page))?.totals.markupPct).toBe(19)
+  })
+
   test('the Viewer role cannot edit', async ({ page }) => {
     const orgs = defaultOrgs()
     orgs[0].projects[0].role = 'Viewer'
@@ -585,6 +639,111 @@ test.describe('estimate', () => {
 
     expect(mock.writes).toEqual([])
     expect(writeCalls(mock)).toEqual([])
+  })
+
+  test('a role the app does not know reads only', async ({ page }) => {
+    const orgs = defaultOrgs()
+    orgs[0].projects[0].role = 'Contributor'
+    const mock = await openEstimate(page, { orgs, data: await seededData() })
+
+    await expect(page.getByTestId('estimate-readonly')).toHaveText('Read only: your project role is Contributor.')
+    await expect(page.getByTestId('markup-add')).toBeDisabled()
+    await selectElement(page, WALL_2)
+    await expect(elementRow(page, WALL_2).getByTestId('row-code')).toBeDisabled()
+    await page.keyboard.press('ControlOrMeta+c')
+    await page.keyboard.press('ControlOrMeta+v')
+    await expect(page.getByTestId('toast').filter({ hasText: 'Read only' })).toBeVisible()
+    expect(writeCalls(mock)).toEqual([])
+  })
+
+  test('a sheet whose assignments cannot be read takes no edit until Retry reads it', async ({ page }) => {
+    let failSheet2 = true
+    const mock = await openEstimate(page, {
+      data: await seededData(),
+      failRead: ({ namespace }) => (failSheet2 && namespace === SHEET_2 ? 500 : undefined),
+    })
+    const wall = await fixtureElement(WALL)
+
+    // Copy a cost code on the first sheet, and select the element to paste it on.
+    await selectElement(page, WALL_2)
+    await page.keyboard.press('ControlOrMeta+c')
+    await expect(page.getByTestId('toast').filter({ hasText: 'Cost code 10-100 copied.' })).toBeVisible()
+    await selectElement(page, WALL)
+
+    // The other sheet cannot be read: it says so, and nothing can be written.
+    await pick(page, page.getByTestId('sheet-select'), 'sheet-2')
+    await expect(page.getByTestId('sheet-error')).toBeVisible()
+    expect(await estimate(page)).toMatchObject({ sheetId: 'sheet-2', sheetStatus: 'error', canEdit: false, assignments: {} })
+    await expect(page.getByTestId('estimate-tree')).toContainText('Could not load this sheet.')
+    await expect(page.getByTestId('markup-add')).toBeDisabled()
+    await expect(page.getByTestId('currency-select')).toBeDisabled()
+    await page.keyboard.press('ControlOrMeta+v')
+    await expect(page.getByTestId('toast').filter({ hasText: 'The sheet is not ready yet.' })).toBeVisible()
+    await page.keyboard.press('ControlOrMeta+x')
+    expect(mock.writes).toEqual([])
+
+    // Retry reads it; the paste then lands in that sheet, and only there.
+    failSheet2 = false
+    await page.getByTestId('sheet-retry').click()
+    await waitForSheet(page)
+    await expect(page.getByTestId('total-value')).toHaveText('€ 1,700')
+    await page.keyboard.press('ControlOrMeta+v')
+    await expect(page.getByTestId('toast').filter({ hasText: 'Cost code 10-100 pasted on 1 elements.' })).toBeVisible()
+    await expect.poll(() => mock.entry(SHEET_2, wall.key)).toMatchObject({ code: 'code-unit', wp: 'wp-shell' })
+    expect(mock.writes.map((write) => write.namespace)).toEqual([SHEET_2])
+  })
+
+  test('an edit made while the estimate is re-read after a failure keeps its other fields', async ({ page }) => {
+    let failNext = false
+    let holdNext = false
+    let held = false
+    let release = (): void => undefined
+    const mock = await openEstimate(page, {
+      data: await seededData(),
+      failWrite: (write) => {
+        if (!failNext || write.kind !== 'put-batch' || write.namespace !== SHEET_1) return undefined
+        failNext = false
+        return 500
+      },
+      // The re-read's list of the sheet is held, with the entries of when it was asked for.
+      holdRead: ({ namespace, key }) => {
+        if (!holdNext || namespace !== SHEET_1 || key !== undefined) return undefined
+        holdNext = false
+        held = true
+        return new Promise<void>((resolve) => {
+          release = resolve
+        })
+      },
+    })
+    const wall2 = await fixtureElement(WALL_2)
+    const loadsBefore = (await estimate(page))?.loads ?? 0
+
+    // A write the server refuses: taken back, then the estimate is re-read, and that read is held.
+    await selectElement(page, WALL)
+    failNext = true
+    holdNext = true
+    await rowMenu(page, WALL, 'exclude')
+    await expect(page.getByTestId('toast').filter({ hasText: 'Could not save the change' })).toBeVisible()
+    await expect.poll(() => held).toBe(true)
+
+    // Meanwhile another element gets a note, which is stored.
+    await selectElement(page, WALL_2)
+    const note = elementRow(page, WALL_2).getByTestId('row-note')
+    await note.fill('checked')
+    await note.press('Enter')
+    await expect.poll(() => mock.entry(SHEET_1, wall2.key)).toMatchObject({ code: 'code-unit', extra: 50, note: 'checked' })
+
+    // The held read arrives older than the screen: what the page takes in still has the note.
+    release()
+    await expect.poll(async () => (await estimate(page))?.loads).toBe(loadsBefore + 1)
+    expect((await estimate(page))?.assignments[wall2.key]).toMatchObject({ note: 'checked' })
+
+    // So the next edit of that element keeps the note on the server.
+    const extra = elementRow(page, WALL_2).getByTestId('row-extra')
+    await extra.fill('75')
+    await extra.press('Enter')
+    await expect.poll(() => mock.entry(SHEET_1, wall2.key)).toMatchObject({ extra: 75 })
+    expect(mock.entry(SHEET_1, wall2.key)).toMatchObject({ code: 'code-unit', note: 'checked', extra: 75 })
   })
 
   test('a refused write shows a toast and the change is taken back', async ({ page }) => {

@@ -184,6 +184,19 @@ h3 {
   /* One tree row, and the inline controls drawn to fit in it. */
   --en-row-h: 26px;
   --en-cell-h: 20px;
+  /* Where a depth-0 tree row's label starts after its toggle: the DS toggle's
+     padding (14) + the caret triangle (5) + the caret's margin (7), as in
+     ds.css's own column-header indent (.ds-cols > .ds-tree__check + .ds-cols__col). */
+  --en-label-indent: calc(14px + 5px + 7px);
+  /* Letter spacing of the DS mono labels; ds.css has no token for it, so these
+     mirror its classes: the eyebrow (.ds-label--eyebrow, 1px) and the column
+     header / form label (.ds-cols__col, .ds-formfield__label, 0.6px). */
+  --en-track-eyebrow: 1px;
+  --en-track-header: 0.6px;
+  /* vim-web's axes panel at the top right of the 3D view: its size and its
+     inset from the corner (vim-web's own CSS, not a DS value). */
+  --en-vimweb-axes-size: 112px;
+  --en-vimweb-axes-inset: 17px;
 }
 
 .en-side {
@@ -202,12 +215,12 @@ h3 {
 
 /* Floats over the 3D view's top right while something is selected and the
    pane is closed (where estimate.html puts it), on the top line of vim-web's
-   axes panel and just left of it (that panel is 112px wide, 17px from the
-   corner). Above the viewer, which isolates its own stacking. */
+   axes panel and one DS gap left of it. Above the viewer, which isolates its
+   own stacking. */
 .en-stage__float {
   position: absolute;
-  top: 17px;
-  right: calc(17px + 112px + var(--ds-space-2));
+  top: var(--en-vimweb-axes-inset);
+  right: calc(var(--en-vimweb-axes-inset) + var(--en-vimweb-axes-size) + var(--ds-space-2));
   z-index: 30;
 }
 
@@ -249,7 +262,7 @@ h3 {
 }
 
 .en-state,
-.en-readonly {
+.en-banner {
   margin-top: var(--ds-space-3);
 }
 
@@ -263,12 +276,8 @@ h3 {
   padding: 0;
 }
 
+/* On the DS eyebrow label (<Label variant="eyebrow">): it only must not wrap. */
 .en-eyebrow {
-  color: var(--text-400);
-  font-family: var(--font-mono);
-  font-size: var(--ds-fs-eyebrow);
-  letter-spacing: 1px;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -551,18 +560,17 @@ h3 {
   color: var(--text-300);
   font-family: var(--font-mono);
   font-size: var(--ds-fs-eyebrow);
-  letter-spacing: 0.6px;
+  letter-spacing: var(--en-track-header);
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-/* The NAME label sits over a depth-0 row's label: the toggle's padding (14)
-   + the caret (5) + its margin (7). */
+/* The NAME label sits over a depth-0 row's label. */
 .en-name.en-th {
   display: block;
   align-self: center;
-  padding-left: 26px;
+  padding-left: var(--en-label-indent);
 }
 
 .en-c-count { width: var(--en-c-count); }
@@ -699,7 +707,7 @@ h3 {
   color: var(--text-400);
   font-family: var(--font-mono);
   font-size: var(--ds-fs-eyebrow);
-  letter-spacing: 1px;
+  letter-spacing: var(--en-track-eyebrow);
   text-transform: uppercase;
 }
 
@@ -727,7 +735,7 @@ h3 {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--ds-space-1);
   align-items: flex-end;
   margin-left: auto;
 }
@@ -736,7 +744,7 @@ h3 {
   color: var(--vim-cyan);
   font-size: var(--ds-fs-eyebrow);
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: var(--en-track-eyebrow);
   text-transform: uppercase;
 }
 
@@ -793,14 +801,6 @@ h3 {
   gap: var(--ds-space-2);
 }
 
-.ed-head {
-  color: var(--text-400);
-  font-family: var(--font-mono);
-  font-size: var(--ds-fs-eyebrow);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-
 .ed-line {
   display: flex;
   gap: var(--ds-space-2);
@@ -817,7 +817,7 @@ h3 {
   color: var(--text-400);
   font-family: var(--font-mono);
   font-size: var(--ds-fs-eyebrow);
-  letter-spacing: 0.6px;
+  letter-spacing: var(--en-track-header);
   text-transform: uppercase;
 }
 

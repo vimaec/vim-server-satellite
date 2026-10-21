@@ -50,26 +50,43 @@ export type CostCodeField = Exclude<keyof CostCode, 'id'>
 /** A message for a toast, from an action that wants to tell the user something. */
 export type Feedback = { tone: 'good' | 'warn'; text: string }
 
+/** What can change on one markup. */
+export type MarkupPatch = { name?: string; pct?: number }
+
+/**
+ * The project roles that may write the estimate (the store answers anything
+ * else with 403). An allow-list, so a role this app does not know, or one not
+ * known yet (''), reads only.
+ */
+export function canWriteRole(role: string): boolean {
+  return role === 'Manager' || role === 'Admin'
+}
+
 export type Estimate = {
   /** The first read of the project's estimate data. */
   status: 'loading' | 'ready' | 'error'
   /** Why the first read failed (status 'error'). */
   error?: string
   /**
-   * Whether the actions write. False until the data and the role are known,
-   * and for the Viewer role (the store refuses its writes with 403). When
-   * false, every write action is a no-op.
+   * Whether the UI may offer writes right now: the data and a writing role
+   * (see `canWriteRole`) are known, the active sheet's assignments are here,
+   * and the model's facts are built. When false, every input is disabled and
+   * the write actions refuse.
    */
   canEdit: boolean
-  /** Read everything again (after a failed load). */
+  /** The project role ('' until known). */
+  role: string
+  /** The role is known and may not write: the panel says the estimate is read-only, and why. */
+  readOnly: boolean
+  /** Read again what failed: the active sheet's assignments (sheetStatus 'error'), else everything. */
   retry: () => void
-  /** Writes are on their way to the server. */
-  saving: boolean
   /**
    * The last write the server refused, already rolled back and followed by a
    * re-read. `seq` grows with each failure, so the UI can toast each one once.
    */
   failure: { seq: number; message: string } | null
+  /** How many whole reads of the estimate were taken in (project open, Retry, the re-read after a failure). */
+  loads: number
 
   /** The UI language (localStorage). */
   lang: Lang
@@ -83,13 +100,18 @@ export type Estimate = {
   sheets: Sheet[]
   /** The active sheet. */
   sheet: Sheet
-  /** True while the active sheet's assignments are being read (after a switch). Writes wait. */
-  sheetLoading: boolean
+  /**
+   * The active sheet's assignments: being read after a switch ('loading'), here
+   * ('ready'), or the read failed ('error', see `sheetError` and `retry`).
+   */
+  sheetStatus: 'loading' | 'ready' | 'error'
+  /** Why the active sheet's assignments could not be read (sheetStatus 'error'). */
+  sheetError?: string
   /** Open another sheet (remembered per project in localStorage). */
   switchSheet: (id: string) => void
   /**
    * A new sheet, made active: empty, or (`fromId`) a copy of that sheet's
-   * assignments, markups and currency. Returns its id, or null when read-only.
+   * assignments, markups and currency. Returns its id, or null when refused.
    */
   addSheet: (name: string, fromId?: string) => string | null
   renameSheet: (id: string, name: string) => void
@@ -97,8 +119,14 @@ export type Estimate = {
   deleteSheet: (id: string) => boolean
   /** The active sheet's currency (ISO code, see CURRENCIES). */
   setCurrency: (currency: string) => void
-  /** Replace the active sheet's markups. */
-  setMarkups: (markups: Markup[]) => void
+  /**
+   * The active sheet's markups, one at a time and by id. Each is applied to
+   * the stored list when it is written, so markups other people added,
+   * changed or deleted meanwhile are kept.
+   */
+  addMarkup: (name: string, pct?: number) => void
+  updateMarkup: (id: string, patch: MarkupPatch) => void
+  deleteMarkup: (id: string) => void
 
   /** Shared by every sheet, by id. */
   workPackages: Map<string, WorkPackage>
@@ -127,9 +155,10 @@ export type Estimate = {
   facts: Map<number, ElementFacts>
   /** The facts build of the current VIM. */
   factsStatus: 'idle' | 'building' | 'ready' | 'error'
-  /** Element key -> element index, for the elements of the loaded model. */
-  indexByKey: Map<string, number>
-  /** The active sheet's assignments, by element key (may include elements not in this model). */
+  /**
+   * The active sheet's assignments, by element key (may include elements not
+   * in this model). Empty while sheetStatus is not 'ready'.
+   */
   assignments: Map<string, Assignment>
   /** Per element index: the element priced in the active sheet. Every element in `facts` has one. */
   priced: Map<number, PricedRow>
@@ -138,8 +167,11 @@ export type Estimate = {
   /** Excluded element indices in the active sheet (hide them in 3D). */
   hidden: Set<number>
 
-  /** Set fields on elements in the active sheet; `null` clears a field. */
-  assign: (elements: readonly number[], patch: AssignmentPatch) => void
+  /**
+   * Set fields on elements in the active sheet; `null` clears a field. False
+   * when refused (no elements, read-only, the sheet or the facts not here yet).
+   */
+  assign: (elements: readonly number[], patch: AssignmentPatch) => boolean
   /** Include (true) or exclude (false) elements. */
   setIncluded: (elements: readonly number[], included: boolean) => void
   /** Ctrl+X: included when every one of them is excluded, else excluded. */
@@ -173,6 +205,24 @@ function defaultMarkups(t: Translator): Markup[] {
   return store.DEFAULT_MARKUPS.map((markup) => ({ ...markup, name: t(markup.name) }))
 }
 
+/**
+ * The active sheet and its assignments, held as ONE value so the two cannot
+ * drift apart.
+ *
+ * Invariant: `assignments` is the assignment map of sheet `id`, or null while
+ * that map is not here (a switch is reading it, or the read failed). Every
+ * change of sheet replaces the whole value, so a switch drops the previous
+ * sheet's map in the same step that names the new sheet; and assignment
+ * writes (assign, Duplicate) are only accepted while the map is not null. An
+ * edit therefore always lands in the sheet its data was read from.
+ */
+type ActiveSheet = {
+  id: string
+  assignments: Map<string, Assignment> | null
+  /** Why the read of the assignments failed (they are then null). */
+  error?: string
+}
+
 /** Assignment changes waiting to go out as one batch. */
 type Pending = {
   projectId: string
@@ -187,7 +237,11 @@ type Pending = {
 /** Assignment changes made within this window go out together. */
 const BATCH_DELAY_MS = 40
 
+/** How many times the re-read after a failure tries again when edits keep arriving while it reads. */
+const RELOAD_ATTEMPTS = 5
+
 const EMPTY_FACTS = new Map<number, ElementFacts>()
+const EMPTY_ASSIGNMENTS = new Map<string, Assignment>()
 
 export function useEstimate(
   projectId: string,
@@ -200,15 +254,16 @@ export function useEstimate(
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | undefined>(undefined)
   const [reload, setReload] = useState(0)
-  const [savingCount, setSavingCount] = useState(0)
+  const [loads, setLoads] = useState(0)
   const [failure, setFailure] = useState<{ seq: number; message: string } | null>(null)
   const [lang, setLangState] = useState<Lang>(loadLang)
   const [sheets, setSheets] = useState<Sheet[]>(() => [virtualSheet(makeT(loadLang(), DEFAULT_CURRENCY))])
-  const [activeId, setActiveId] = useState<string>(store.FIRST_SHEET_ID)
-  const [sheetLoading, setSheetLoading] = useState(false)
+  const [active, setActiveState] = useState<ActiveSheet>(() => ({
+    id: store.FIRST_SHEET_ID,
+    assignments: new Map(),
+  }))
   const [workPackages, setWorkPackages] = useState<Map<string, WorkPackage>>(() => new Map())
   const [costCodes, setCostCodes] = useState<Map<string, CostCode>>(() => new Map())
-  const [assignments, setAssignmentsState] = useState<Map<string, Assignment>>(() => new Map())
   const [facts, setFacts] = useState<Map<number, ElementFacts>>(EMPTY_FACTS)
   const [factsStatus, setFactsStatus] = useState<Estimate['factsStatus']>('idle')
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
@@ -224,10 +279,19 @@ export function useEstimate(
   const pendingRef = useRef<Pending | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** Sheets created on the server by this page (project/sheet), so a virtual one is created once. */
-  const createdRef = useRef(new Map<string, Promise<void>>())
+  const createdRef = useRef(new Map<string, Promise<boolean>>())
   const failureSeq = useRef(0)
-  /** Bumped on every sheet switch; a slower read of an older switch is dropped. */
+  /**
+   * Bumped whenever the active sheet is replaced (a switch, or a whole read
+   * taken in). A sheet read that lands after a newer one started is dropped.
+   */
   const switchSeq = useRef(0)
+  /**
+   * Bumped by every local edit that will be written (when it is made, before
+   * its write goes out). A re-read that saw it move while it was out is older
+   * than the screen and must not replace it.
+   */
+  const writeGenRef = useRef(0)
   /** Per sheet id: how many edits of its document were made, so only the newest adopts the server's copy. */
   const sheetEditsRef = useRef(new Map<string, number>())
   /** The latest `flush`, for the project-change cleanup (declared before `flush` exists). */
@@ -237,35 +301,41 @@ export function useEstimate(
 
   // Actions read the latest state through refs: two actions in one event must
   // see each other's changes, and stable callbacks keep a 20k-row tree from
-  // re-rendering on every keystroke.
-  const assignmentsRef = useRef(assignments)
+  // re-rendering on every keystroke. `activeRef` is only ever set together
+  // with the state (setActive), never from a render.
+  const activeRef = useRef(active)
   const sheetsRef = useRef(sheets)
-  const activeIdRef = useRef(activeId)
   const workPackagesRef = useRef(workPackages)
   const costCodesRef = useRef(costCodes)
   const factsRef = useRef(facts)
   const langRef = useRef(lang)
   const copiedRef = useRef(copiedCode)
+  const statusRef = useRef(status)
   sheetsRef.current = sheets
-  activeIdRef.current = activeId
   workPackagesRef.current = workPackages
   costCodesRef.current = costCodes
   factsRef.current = facts
   langRef.current = lang
   copiedRef.current = copiedCode
+  statusRef.current = status
 
-  // An empty role means GET /project/{id}/role has not answered yet: not a writer yet.
-  const canEdit = status === 'ready' && role !== '' && role !== 'Viewer'
-  const canEditRef = useRef(canEdit)
-  canEditRef.current = canEdit
-  const sheetLoadingRef = useRef(sheetLoading)
-  sheetLoadingRef.current = sheetLoading
+  const roleCanWrite = canWriteRole(role)
+  const readOnly = role !== '' && !roleCanWrite
+  /** The data is read and the role may write: what the sheet, code and package actions need. */
+  const mayWrite = status === 'ready' && roleCanWrite
+  const canEdit = mayWrite && active.assignments !== null && facts.size > 0
+  const mayWriteRef = useRef(mayWrite)
+  mayWriteRef.current = mayWrite
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
+  const roleRef = useRef(role)
+  roleRef.current = role
   const byRef = useRef(by)
   byRef.current = by
 
-  const setAssignments = useCallback((next: Map<string, Assignment>) => {
-    assignmentsRef.current = next
-    setAssignmentsState(next)
+  const setActive = useCallback((next: ActiveSheet) => {
+    activeRef.current = next
+    setActiveState(next)
   }, [])
 
   const setSheetsNow = useCallback((next: Sheet[]) => {
@@ -274,23 +344,31 @@ export function useEstimate(
   }, [])
 
   const tNow = useCallback((): Translator => {
-    const sheet = sheetsRef.current.find((entry) => entry.id === activeIdRef.current)
+    const sheet = sheetsRef.current.find((entry) => entry.id === activeRef.current.id)
     return makeT(langRef.current, sheet?.currency ?? DEFAULT_CURRENCY)
   }, [])
 
-  /** Take everything from a fresh read. */
+  /** Take the shared lists of a fresh read: sheets, work packages, cost codes. */
+  const adoptLists = useCallback(
+    (load: store.EstimateLoad) => {
+      setSheetsNow(load.sheets.length ? load.sheets : [virtualSheet(tNow())])
+      workPackagesRef.current = load.workPackages
+      setWorkPackages(load.workPackages)
+      costCodesRef.current = load.costCodes
+      setCostCodes(load.costCodes)
+      setLoads((count) => count + 1)
+    },
+    [setSheetsNow, tNow],
+  )
+
+  /** Take everything from a fresh read, the active sheet included; a sheet read still out is dropped. */
   const adopt = useCallback(
     (load: store.EstimateLoad) => {
-      const nextSheets = load.sheets.length ? load.sheets : [virtualSheet(tNow())]
-      setSheetsNow(nextSheets)
-      activeIdRef.current = load.sheetId
-      setActiveId(load.sheetId)
-      setWorkPackages(load.workPackages)
-      setCostCodes(load.costCodes)
-      setAssignments(load.assignments)
-      setSheetLoading(false)
+      adoptLists(load)
+      switchSeq.current++
+      setActive({ id: load.sheetId, assignments: load.assignments })
     },
-    [setAssignments, setSheetsNow, tNow],
+    [adoptLists, setActive],
   )
 
   // ---- load on project open ------------------------------------------------------------------
@@ -300,9 +378,7 @@ export function useEstimate(
     setStatus('loading')
     setError(undefined)
     setFailure(null)
-    setSavingCount(0)
     setCopiedCode(null)
-    setSheetLoading(false)
 
     void (async () => {
       try {
@@ -323,8 +399,6 @@ export function useEstimate(
       epochRef.current++
     }
   }, [adopt, projectId, reload])
-
-  const retry = useCallback(() => setReload((count) => count + 1), [])
 
   // ---- facts: once per loaded vim ------------------------------------------------------------
 
@@ -356,21 +430,39 @@ export function useEstimate(
 
   // ---- the write queue -----------------------------------------------------------------------
 
-  /** Re-read everything once the queue is idle, keeping the active sheet. */
+  /**
+   * Re-reads everything once the queue is idle, keeping the active sheet. The
+   * read is only taken in when no edit was made while it was out: such an edit
+   * is on screen and its write lands after the read, so the read would take it
+   * off the screen, and the next edit of that element would be built from the
+   * stale entry and write it back whole. The read then runs again, after that
+   * write.
+   */
   const reloadQuietly = useCallback(() => {
     const epoch = epochRef.current
     void (async () => {
-      await chainRef.current.catch(() => undefined)
-      if (epoch !== epochRef.current) return
-      try {
-        const load = await store.loadEstimate(projectId, activeIdRef.current)
+      for (let attempt = 0; attempt < RELOAD_ATTEMPTS; attempt++) {
+        flushRef.current()
+        await chainRef.current.catch(() => undefined)
         if (epoch !== epochRef.current) return
-        adopt(load)
-      } catch {
-        // The failure is already on screen; the next action or Retry tries again.
+        const writes = writeGenRef.current
+        const switches = switchSeq.current
+        let load: store.EstimateLoad
+        try {
+          load = await store.loadEstimate(projectId, activeRef.current.id)
+        } catch {
+          // The failure is already on screen; the next action or Retry tries again.
+          return
+        }
+        if (epoch !== epochRef.current) return
+        if (writes !== writeGenRef.current) continue
+        // The user opened another sheet meanwhile: its own read fills it.
+        if (switches !== switchSeq.current) adoptLists(load)
+        else adopt(load)
+        return
       }
     })()
-  }, [adopt, projectId])
+  }, [adopt, adoptLists, projectId])
 
   const fail = useCallback(
     (cause: unknown) => {
@@ -384,17 +476,12 @@ export function useEstimate(
   const enqueue = useCallback(
     (task: () => Promise<void>, onError?: () => void) => {
       const epoch = epochRef.current
-      setSavingCount((count) => count + 1)
-      chainRef.current = chainRef.current
-        .then(task)
-        .catch((cause: unknown) => {
-          if (epoch !== epochRef.current) return
-          onError?.()
-          fail(cause)
-        })
-        .finally(() => {
-          if (epoch === epochRef.current) setSavingCount((count) => Math.max(0, count - 1))
-        })
+      writeGenRef.current++
+      chainRef.current = chainRef.current.then(task).catch((cause: unknown) => {
+        if (epoch !== epochRef.current) return
+        onError?.()
+        fail(cause)
+      })
     },
     [fail],
   )
@@ -402,23 +489,27 @@ export function useEstimate(
   /**
    * Makes sure a sheet exists on the server before anything is written to or
    * about it. A virtual sheet is created (create-only) the first time; the
-   * promise is shared so concurrent writers create it once.
+   * promise is shared so concurrent writers create it once. True when THIS
+   * call created it, with the content it was given.
    */
-  const ensureStored = useCallback(async (project: string, sheet: Sheet): Promise<void> => {
-    if (!sheet.virtual) return
+  const ensureStored = useCallback(async (project: string, sheet: Sheet): Promise<boolean> => {
+    if (!sheet.virtual) return false
     const id = `${project}/${sheet.id}`
     let created = createdRef.current.get(id)
+    const mine = !created
     if (!created) {
-      created = store.createSheet(project, { ...sheet, virtual: undefined }).then(() => undefined)
+      created = store.createSheet(project, { ...sheet, virtual: undefined })
       createdRef.current.set(id, created)
       created.catch(() => createdRef.current.delete(id))
     }
-    await created
-    if (project !== projectIdRef.current) return
-    const current = sheetsRef.current
-    if (current.some((entry) => entry.id === sheet.id && entry.virtual)) {
-      setSheetsNow(current.map((entry) => (entry.id === sheet.id ? { ...entry, virtual: undefined } : entry)))
+    const stored = await created
+    if (project === projectIdRef.current) {
+      const current = sheetsRef.current
+      if (current.some((entry) => entry.id === sheet.id && entry.virtual)) {
+        setSheetsNow(current.map((entry) => (entry.id === sheet.id ? { ...entry, virtual: undefined } : entry)))
+      }
     }
+    return mine && stored
   }, [setSheetsNow])
 
   /** Sends the pending assignment batch now. */
@@ -443,54 +534,58 @@ export function useEstimate(
       },
       () => {
         // Take back only what this batch changed and nothing changed since.
-        if (activeIdRef.current !== batch.sheet.id) return
-        const current = assignmentsRef.current
-        const next = new Map(current)
+        const current = activeRef.current
+        if (current.id !== batch.sheet.id || !current.assignments) return
+        const map = current.assignments
+        const next = new Map(map)
         let changed = false
         for (const [key, value] of batch.next) {
-          if ((current.get(key) ?? null) !== value) continue
+          if ((map.get(key) ?? null) !== value) continue
           const before = batch.before.get(key)
           if (before) next.set(key, before)
           else next.delete(key)
           changed = true
         }
-        if (changed) setAssignments(next)
+        if (changed) setActive({ id: current.id, assignments: next })
       },
     )
-  }, [enqueue, ensureStored, setAssignments])
+  }, [enqueue, ensureStored, setActive])
 
   flushRef.current = flush
 
-  /** Whether the active sheet takes assignment writes right now. */
+  /** Whether the active sheet takes assignment writes right now (see ActiveSheet). */
   const writable = useCallback(
-    () => canEditRef.current && !sheetLoadingRef.current && factsRef.current.size > 0,
+    () => mayWriteRef.current && activeRef.current.assignments !== null && factsRef.current.size > 0,
     [],
   )
 
   // ---- assignments ---------------------------------------------------------------------------
 
   const assign = useCallback(
-    (elements: readonly number[], patch: AssignmentPatch) => {
-      if (!writable() || elements.length === 0) return
-      const sheet = sheetsRef.current.find((entry) => entry.id === activeIdRef.current)
-      if (!sheet) return
+    (elements: readonly number[], patch: AssignmentPatch): boolean => {
+      if (!writable() || elements.length === 0) return false
+      const current = activeRef.current
+      const map = current.assignments
+      const sheet = sheetsRef.current.find((entry) => entry.id === current.id)
+      if (!map || !sheet) return false
       const at = new Date().toISOString()
-      const current = assignmentsRef.current
       let next: Map<string, Assignment> | null = null
       const changes: [string, Assignment | null, Assignment | undefined][] = []
       for (const index of new Set(elements)) {
         const fact = factsRef.current.get(index)
         if (!fact) continue
-        const before = current.get(fact.key)
+        const before = map.get(fact.key)
         const after = applyPatch(before, patch, { elementId: fact.elementId, by: byRef.current, at })
         if (after === undefined) continue
-        next ??= new Map(current)
+        next ??= new Map(map)
         if (after) next.set(fact.key, after)
         else next.delete(fact.key)
         changes.push([fact.key, after, before])
       }
-      if (!next) return
-      setAssignments(next)
+      // Nothing to change: the elements already say so.
+      if (!next) return true
+      writeGenRef.current++
+      setActive({ id: current.id, assignments: next })
 
       let pending = pendingRef.current
       if (pending && (pending.sheet.id !== sheet.id || pending.projectId !== projectId)) {
@@ -506,22 +601,25 @@ export function useEstimate(
         pending.next.set(key, after)
       }
       if (!timerRef.current) timerRef.current = setTimeout(() => flushRef.current(), BATCH_DELAY_MS)
+      return true
     },
-    [flush, projectId, setAssignments, writable],
+    [flush, projectId, setActive, writable],
   )
 
   const setIncluded = useCallback(
-    (elements: readonly number[], included: boolean) => assign(elements, { hidden: !included }),
+    (elements: readonly number[], included: boolean) => {
+      assign(elements, { hidden: !included })
+    },
     [assign],
   )
 
   const toggleIncluded = useCallback(
     (elements: readonly number[]) => {
-      if (elements.length === 0) return
-      const current = assignmentsRef.current
+      const map = activeRef.current.assignments
+      if (elements.length === 0 || !map) return
       const allExcluded = elements.every((index) => {
         const fact = factsRef.current.get(index)
-        return fact ? current.get(fact.key)?.hidden === true : true
+        return fact ? map.get(fact.key)?.hidden === true : true
       })
       assign(elements, { hidden: !allExcluded })
     },
@@ -530,23 +628,22 @@ export function useEstimate(
 
   // ---- sheets --------------------------------------------------------------------------------
 
-  /** Reads a sheet's assignments and makes it the active one. */
+  /**
+   * Makes a sheet the active one. `known` is its assignments when the caller
+   * has them (a new or duplicated sheet); else they are read, and until they
+   * land the active sheet has no map, so nothing can be written to it.
+   */
   const openSheet = useCallback(
     (id: string, known?: Map<string, Assignment>) => {
       flush()
       const seq = ++switchSeq.current
-      activeIdRef.current = id
-      setActiveId(id)
       saveActiveSheet(projectId, id)
       const sheet = sheetsRef.current.find((entry) => entry.id === id)
       if (known || sheet?.virtual) {
-        setAssignments(known ?? new Map())
-        setSheetLoading(false)
-        sheetLoadingRef.current = false
+        setActive({ id, assignments: known ?? new Map() })
         return
       }
-      setSheetLoading(true)
-      sheetLoadingRef.current = true
+      setActive({ id, assignments: null })
       const epoch = epochRef.current
       void (async () => {
         try {
@@ -554,31 +651,35 @@ export function useEstimate(
           await chainRef.current.catch(() => undefined)
           const loaded = await store.loadAssignments(projectId, id)
           if (epoch !== epochRef.current || seq !== switchSeq.current) return
-          setAssignments(loaded)
-          setSheetLoading(false)
+          setActive({ id, assignments: loaded })
         } catch (cause: unknown) {
           if (epoch !== epochRef.current || seq !== switchSeq.current) return
-          setSheetLoading(false)
-          fail(cause)
+          setActive({ id, assignments: null, error: messageOf(cause) })
         }
       })()
     },
-    [fail, flush, projectId, setAssignments],
+    [flush, projectId, setActive],
   )
 
   const switchSheet = useCallback(
     (id: string) => {
-      if (id === activeIdRef.current) return
+      if (id === activeRef.current.id) return
       if (!sheetsRef.current.some((entry) => entry.id === id)) return
       openSheet(id)
     },
     [openSheet],
   )
 
+  const retry = useCallback(() => {
+    const current = activeRef.current
+    if (statusRef.current === 'ready' && current.error !== undefined) openSheet(current.id)
+    else setReload((count) => count + 1)
+  }, [openSheet])
+
   /** Applies a change to one sheet document, locally now and on the server (read-modify-write). */
   const changeSheet = useCallback(
     (id: string, mutate: (sheet: Sheet) => Sheet) => {
-      if (!canEditRef.current) return
+      if (!mayWriteRef.current) return
       const before = sheetsRef.current.find((entry) => entry.id === id)
       if (!before) return
       setSheetsNow(sheetsRef.current.map((entry) => (entry.id === id ? mutate(entry) : entry)))
@@ -587,8 +688,8 @@ export function useEstimate(
       const project = projectId
       enqueue(async () => {
         const local = sheetsRef.current.find((entry) => entry.id === id)
-        // A virtual sheet is created with the change already in it; the update below is then a no-op.
-        await ensureStored(project, local ?? mutate(before))
+        // A virtual sheet created here is stored with this change already in it: nothing more to write.
+        if (await ensureStored(project, local ?? mutate(before))) return
         const stored = await store.updateSheet(project, id, mutate)
         // After a 412 the stored sheet also holds someone else's change: show it. Not when a
         // newer edit of this sheet is queued, which would flash back; that one adopts its own.
@@ -608,27 +709,56 @@ export function useEstimate(
   )
 
   const setCurrency = useCallback(
-    (currency: string) => changeSheet(activeIdRef.current, (sheet) => ({ ...sheet, currency })),
+    (currency: string) => changeSheet(activeRef.current.id, (sheet) => ({ ...sheet, currency })),
     [changeSheet],
   )
 
-  const setMarkups = useCallback(
-    (markups: Markup[]) =>
-      changeSheet(activeIdRef.current, (sheet) => ({
-        ...sheet,
-        markups: markups.map((markup) => ({ ...markup, pct: Number(markup.pct) || 0 })),
-      })),
+  /** A change of the active sheet's markup list, applied to whatever list it meets (local, then stored). */
+  const changeMarkups = useCallback(
+    (change: (markups: Markup[]) => Markup[]) =>
+      changeSheet(activeRef.current.id, (sheet) => ({ ...sheet, markups: change(sheet.markups) })),
     [changeSheet],
+  )
+
+  const addMarkup = useCallback(
+    (name: string, pct = 0) => {
+      const markup: Markup = { id: newId('markup'), name: name.trim(), pct: Number(pct) || 0 }
+      // A retry after a 412 applies this again: the id keeps it from being added twice.
+      changeMarkups((markups) => (markups.some((entry) => entry.id === markup.id) ? markups : [...markups, markup]))
+    },
+    [changeMarkups],
+  )
+
+  const updateMarkup = useCallback(
+    (id: string, patch: MarkupPatch) => {
+      const name = patch.name?.trim()
+      const pct = patch.pct === undefined ? undefined : Number(patch.pct) || 0
+      changeMarkups((markups) =>
+        markups.map((entry) =>
+          entry.id === id ? { ...entry, ...(name ? { name } : {}), ...(pct === undefined ? {} : { pct }) } : entry,
+        ),
+      )
+    },
+    [changeMarkups],
+  )
+
+  const deleteMarkup = useCallback(
+    (id: string) => changeMarkups((markups) => markups.filter((entry) => entry.id !== id)),
+    [changeMarkups],
   )
 
   const addSheet = useCallback(
     (name: string, fromId?: string): string | null => {
-      if (!canEditRef.current) return null
+      // A copy of the active sheet copies the map on screen, which must be that sheet's.
+      if (!writable()) return null
       const trimmed = name.trim()
       if (!trimmed) return null
       flush()
       const list = sheetsRef.current
-      const active = list.find((entry) => entry.id === activeIdRef.current) ?? list[0]
+      const current = activeRef.current
+      const map = current.assignments
+      if (!map) return null
+      const active = list.find((entry) => entry.id === current.id) ?? list[0]
       const from = fromId ? list.find((entry) => entry.id === fromId) : undefined
       const sheet: Sheet = {
         id: newId('sheet'),
@@ -639,8 +769,7 @@ export function useEstimate(
       }
       // A virtual sheet next to a stored one would vanish on the next read: store it too.
       const virtuals = list.filter((entry) => entry.virtual)
-      const copied =
-        from && from.id === activeIdRef.current ? new Map(assignmentsRef.current) : undefined
+      const copied = from && from.id === current.id ? new Map(map) : undefined
       setSheetsNow([...list, sheet])
       const project = projectId
       enqueue(
@@ -650,30 +779,32 @@ export function useEstimate(
           if (!from) return
           const source = copied ?? (await store.loadAssignments(project, from.id))
           await store.copyAssignments(project, sheet.id, source)
-          if (!copied && activeIdRef.current === sheet.id && project === projectIdRef.current) {
-            setAssignments(new Map(source))
-          }
         },
         () => {
-          setSheetsNow(sheetsRef.current.filter((entry) => entry.id !== sheet.id))
+          const rest = sheetsRef.current.filter((entry) => entry.id !== sheet.id)
+          setSheetsNow(rest)
+          // The page must not stay on a sheet that was never made: its edits would go nowhere.
+          if (activeRef.current.id === sheet.id && rest.length) openSheet(rest[0].id)
         },
       )
-      openSheet(sheet.id, copied ?? new Map())
+      // A copy of another sheet is read back once the queue has made it.
+      if (from && !copied) openSheet(sheet.id)
+      else openSheet(sheet.id, copied ?? new Map())
       return sheet.id
     },
-    [enqueue, ensureStored, flush, openSheet, projectId, setAssignments, setSheetsNow, tNow],
+    [enqueue, ensureStored, flush, openSheet, projectId, setSheetsNow, tNow, writable],
   )
 
   const deleteSheet = useCallback(
     (id: string): boolean => {
-      if (!canEditRef.current) return false
+      if (!mayWriteRef.current) return false
       const list = sheetsRef.current
       const sheet = list.find((entry) => entry.id === id)
       if (!sheet || list.length < 2) return false
       flush()
       const rest = list.filter((entry) => entry.id !== id)
       setSheetsNow(rest)
-      if (activeIdRef.current === id) openSheet(rest[0].id)
+      if (activeRef.current.id === id) openSheet(rest[0].id)
       if (!sheet.virtual) {
         const project = projectId
         enqueue(() => store.deleteSheet(project, id))
@@ -688,25 +819,27 @@ export function useEstimate(
   /** Drops an id from the active sheet's local assignments (the server side is done by the store). */
   const clearLocally = useCallback(
     (field: 'wp' | 'code', id: string) => {
-      const current = assignmentsRef.current
+      const current = activeRef.current
+      const map = current.assignments
+      if (!map) return
       let next: Map<string, Assignment> | null = null
-      for (const [key, assignment] of current) {
+      for (const [key, assignment] of map) {
         if (assignment[field] !== id) continue
-        next ??= new Map(current)
+        next ??= new Map(map)
         const changed = { ...assignment }
         delete changed[field]
         if (changed.wp || changed.code || changed.extra !== undefined || changed.note || changed.hidden) {
           next.set(key, changed)
         } else next.delete(key)
       }
-      if (next) setAssignments(next)
+      if (next) setActive({ id: current.id, assignments: next })
     },
-    [setAssignments],
+    [setActive],
   )
 
   const addWorkPackage = useCallback(
     (name: string): string | null => {
-      if (!canEditRef.current) return null
+      if (!mayWriteRef.current) return null
       const trimmed = name.trim()
       if (!trimmed) return null
       const list = [...workPackagesRef.current.values()]
@@ -732,7 +865,7 @@ export function useEstimate(
 
   const renameWorkPackage = useCallback(
     (id: string, name: string) => {
-      if (!canEditRef.current) return
+      if (!mayWriteRef.current) return
       const trimmed = name.trim()
       const wp = workPackagesRef.current.get(id)
       if (!wp || !trimmed) return
@@ -748,7 +881,7 @@ export function useEstimate(
 
   const deleteWorkPackage = useCallback(
     (id: string) => {
-      if (!canEditRef.current || !workPackagesRef.current.has(id)) return
+      if (!mayWriteRef.current || !workPackagesRef.current.has(id)) return
       // Queued edits that set this package must reach the server before the clean-up runs.
       flush()
       const next = new Map(workPackagesRef.current)
@@ -787,7 +920,7 @@ export function useEstimate(
 
   const upsertCode = useCallback(
     (input: Partial<CostCode>): string | null => {
-      if (!canEditRef.current) return null
+      if (!mayWriteRef.current) return null
       const codes = costCodesRef.current
       const typed = input.code?.trim()
       const existing =
@@ -821,7 +954,7 @@ export function useEstimate(
 
   const updateCode = useCallback(
     <K extends CostCodeField>(id: string, field: K, value: CostCode[K]) => {
-      if (!canEditRef.current) return
+      if (!mayWriteRef.current) return
       const code = costCodesRef.current.get(id)
       if (!code || code[field] === value) return
       saveCode({ ...code, [field]: value })
@@ -831,7 +964,7 @@ export function useEstimate(
 
   const deleteCode = useCallback(
     (id: string) => {
-      if (!canEditRef.current || !costCodesRef.current.has(id)) return
+      if (!mayWriteRef.current || !costCodesRef.current.has(id)) return
       flush()
       const next = new Map(costCodesRef.current)
       next.delete(id)
@@ -852,7 +985,7 @@ export function useEstimate(
       const t = tNow()
       if (elements.length !== 1) return { tone: 'warn', text: t('Select one element to copy its cost code.') }
       const fact = factsRef.current.get(elements[0])
-      const id = fact ? assignmentsRef.current.get(fact.key)?.code : undefined
+      const id = fact ? activeRef.current.assignments?.get(fact.key)?.code : undefined
       const code = id ? costCodesRef.current.get(id) : undefined
       if (!code) return { tone: 'warn', text: t('This element has no cost code.') }
       copiedRef.current = code.id
@@ -870,8 +1003,12 @@ export function useEstimate(
       if (elements.length === 0) {
         return { tone: 'warn', text: t('Select elements in the 3D view or the Elements tab first.') }
       }
-      if (!canEditRef.current) return { tone: 'warn', text: t('Read only: your project role is Viewer.') }
-      assign(elements, { code: code.id })
+      if (!assign(elements, { code: code.id })) {
+        const text = readOnlyRef.current
+          ? t('Read only: your project role is {role}.', { role: roleRef.current })
+          : t('The sheet is not ready yet. Try again in a moment.')
+        return { tone: 'warn', text }
+      }
       return {
         tone: 'good',
         text: t('Cost code {code} pasted on {n} elements.', {
@@ -907,20 +1044,22 @@ export function useEstimate(
 
   // ---- derived -------------------------------------------------------------------------------
 
+  const assignments = active.assignments ?? EMPTY_ASSIGNMENTS
+  const sheetStatus: Estimate['sheetStatus'] = active.assignments
+    ? 'ready'
+    : active.error !== undefined
+      ? 'error'
+      : 'loading'
+  const sheetError = active.error
   const sheet = useMemo(
-    () => sheets.find((entry) => entry.id === activeId) ?? sheets[0],
-    [activeId, sheets],
+    () => sheets.find((entry) => entry.id === active.id) ?? sheets[0],
+    [active.id, sheets],
   )
   const t = useMemo(() => makeT(lang, sheet.currency), [lang, sheet.currency])
   const money = useCallback(
     (value: number | null | undefined) => formatMoney(value, sheet.currency),
     [sheet.currency],
   )
-  const indexByKey = useMemo(() => {
-    const out = new Map<string, number>()
-    for (const fact of facts.values()) out.set(fact.key, fact.index)
-    return out
-  }, [facts])
   const priced = useMemo(
     () => priceRows(facts, assignments, costCodes, workPackages),
     [assignments, costCodes, facts, workPackages],
@@ -938,22 +1077,27 @@ export function useEstimate(
       status,
       error,
       canEdit,
+      role,
+      readOnly,
       retry,
-      saving: savingCount > 0,
       failure,
+      loads,
       lang,
       setLang,
       t,
       money,
       sheets,
       sheet,
-      sheetLoading,
+      sheetStatus,
+      sheetError,
       switchSheet,
       addSheet,
       renameSheet,
       deleteSheet,
       setCurrency,
-      setMarkups,
+      addMarkup,
+      updateMarkup,
+      deleteMarkup,
       workPackages,
       addWorkPackage,
       renameWorkPackage,
@@ -965,7 +1109,6 @@ export function useEstimate(
       usage,
       facts,
       factsStatus,
-      indexByKey,
       assignments,
       priced,
       totals,
@@ -978,6 +1121,7 @@ export function useEstimate(
       pasteCode,
     }),
     [
+      addMarkup,
       addSheet,
       addWorkPackage,
       assign,
@@ -987,6 +1131,7 @@ export function useEstimate(
       copyCode,
       costCodes,
       deleteCode,
+      deleteMarkup,
       deleteSheet,
       deleteWorkPackage,
       error,
@@ -994,21 +1139,22 @@ export function useEstimate(
       factsStatus,
       failure,
       hidden,
-      indexByKey,
       lang,
+      loads,
       money,
       pasteCode,
       priced,
+      readOnly,
       renameSheet,
       renameWorkPackage,
       retry,
-      savingCount,
+      role,
       setCurrency,
       setIncluded,
       setLang,
-      setMarkups,
       sheet,
-      sheetLoading,
+      sheetError,
+      sheetStatus,
       sheets,
       status,
       switchSheet,
@@ -1016,6 +1162,7 @@ export function useEstimate(
       toggleIncluded,
       totals,
       updateCode,
+      updateMarkup,
       upsertCode,
       usage,
       workPackages,

@@ -36,11 +36,8 @@ export type ViewerPaneProps = {
   onVimLoaded: (vim: IWebglVim | undefined) => void
   onSelectionChanged: (indices: number[]) => void
   onStatus: (status: ViewerStatus) => void
-  /**
-   * Filled in with a "fit the camera to the selection" function, so a button
-   * outside the viewer can drive the camera without owning the viewer.
-   */
-  frameRef?: { current: (() => void) | null }
+  /** The status texts, in the page's language (English by default). */
+  texts?: ViewerTexts
   /**
    * Filled in with a "fit the camera to these elements" function, for the Cost
    * Details camera toggle: it frames the element it shows, which is not
@@ -55,14 +52,16 @@ export type ViewerPaneProps = {
   onContextMenu?: (x: number, y: number) => void
 }
 
-const STATUS_TEXT: Record<ViewerStatus, string> = {
+/** What the status line says in each state, and while the page still resolves the snapshot. */
+export type ViewerTexts = Record<ViewerStatus, string> & { resolving: string }
+
+const DEFAULT_TEXTS: ViewerTexts = {
   idle: 'No VIM in this project yet.',
   loading: 'Loading the snapshot…',
   loaded: 'Loaded',
   error: 'Could not load the snapshot.',
+  resolving: 'Opening the project…',
 }
-
-const RESOLVING_TEXT = 'Opening the project…'
 
 /** The element indices currently selected in the viewer. */
 function selectedIndices(viewer: ViewerApi): number[] {
@@ -137,7 +136,7 @@ export function ViewerPane({
   onVimLoaded,
   onSelectionChanged,
   onStatus,
-  frameRef,
+  texts = DEFAULT_TEXTS,
   frameElementsRef,
   onContextMenu,
 }: ViewerPaneProps): JSX.Element {
@@ -348,20 +347,6 @@ export function ViewerPane({
     hiddenRef.current = new Set(hidden)
   }, [hidden, vimEpoch])
 
-  // Hand the page a way to frame the selection.
-  useEffect(() => {
-    if (!frameRef) return
-    frameRef.current = () => {
-      const viewer = viewerRef.current
-      if (!viewer) return
-      if (viewer.core.selection.any()) void viewer.framing.frameSelection.call()
-      else void viewer.framing.frameScene.call()
-    }
-    return () => {
-      frameRef.current = null
-    }
-  }, [frameRef])
-
   // Hand Cost Details a way to frame any elements, selected or not.
   useEffect(() => {
     if (!frameElementsRef) return
@@ -405,7 +390,7 @@ export function ViewerPane({
   )
 
   const message =
-    sourceError || loadError || (resolving ? RESOLVING_TEXT : STATUS_TEXT[shownStatus])
+    sourceError || loadError || (resolving ? texts.resolving : texts[shownStatus])
 
   return (
     // position: relative is required — createViewer pins the div it is given to

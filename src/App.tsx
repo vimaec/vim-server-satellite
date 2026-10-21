@@ -72,6 +72,8 @@ export function App(): JSX.Element {
     )
   }
   if (state === 'sign-in') return <SignInPage />
-  if (state === 'project') return <ProjectPage projectId={projectId} onBack={closeProject} />
+  // Keyed by the project: a direct switch (Back / Forward) starts a fresh page, so no state of
+  // the previous project, such as its role, applies to the next one even for a moment.
+  if (state === 'project') return <ProjectPage key={projectId} projectId={projectId} onBack={closeProject} />
   return <ProjectPickerPage onOpen={openProject} />
 }

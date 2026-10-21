@@ -182,11 +182,14 @@ export function ElementTree({ placeholder, open, setOpen }: ElementTreeProps): J
     setMenu({ x: event.clientX, y: event.clientY, items })
   }, [])
 
+  // The rows' context depends on the stable verbs and the data the rows show, not on `est`
+  // itself: a new `est` must not re-render every visible row unless what they show changed.
+  const { assign, setIncluded, renameWorkPackage, lang, workPackages, costCodes } = est
   const ctx = useMemo(
     (): RowContext => ({
       t,
       canEdit,
-      labels: { t, lang: est.lang, workPackages: est.workPackages, costCodes: est.costCodes },
+      labels: { t, lang, workPackages, costCodes },
       wpOptions,
       codeOptions,
       onClick,
@@ -197,18 +200,32 @@ export function ElementTree({ placeholder, open, setOpen }: ElementTreeProps): J
           if (!next.delete(key)) next.add(key)
           return next
         }),
-      onCheck: (node, included) => est.setIncluded(elementsOf(node), included),
-      onWorkPackage: (node, id) => est.assign(elementsOf(node), { wp: id === CLEAR ? null : id }),
-      onCode: (node, id) => est.assign(elementsOf(node), { code: id === CLEAR ? null : id }),
+      onCheck: (node, included) => setIncluded(elementsOf(node), included),
+      onWorkPackage: (node, id) => void assign(elementsOf(node), { wp: id === CLEAR ? null : id }),
+      onCode: (node, id) => void assign(elementsOf(node), { code: id === CLEAR ? null : id }),
       onPickWorkPackage: (node) => uiRef.current.openWorkPackage(elementsOf(node)),
       onPickCode: (node) => uiRef.current.openCostCode(elementsOf(node)),
-      onExtra: (index, value) => est.assign([index], { extra: value }),
-      onNote: (index, text) => est.assign([index], { note: text || null }),
+      onExtra: (index, value) => void assign([index], { extra: value }),
+      onNote: (index, text) => void assign([index], { note: text || null }),
       onStartRename: (node) => setRenaming(node.key),
-      onRename: (wpId, name) => est.renameWorkPackage(wpId, name),
+      onRename: (wpId, name) => renameWorkPackage(wpId, name),
       onEndRename: () => setRenaming(null),
     }),
-    [canEdit, codeOptions, est, onClick, onContextMenu, setOpen, t, wpOptions],
+    [
+      assign,
+      canEdit,
+      codeOptions,
+      costCodes,
+      lang,
+      onClick,
+      onContextMenu,
+      renameWorkPackage,
+      setIncluded,
+      setOpen,
+      t,
+      workPackages,
+      wpOptions,
+    ],
   )
 
   const swatches = paint.swatches

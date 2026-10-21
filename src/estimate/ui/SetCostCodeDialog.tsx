@@ -49,6 +49,7 @@ export function SetCostCodeDialog({ elements, onClose }: { elements: number[]; o
     est.assign(elements, { code: id })
   }
   const commit = (): void => {
+    // `ready` includes canEdit, so a new code is only created when its assignment can be written too.
     if (!ready || choice === null) return
     if (!creating) {
       apply(choice)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type * as VIM from 'vim-web'
 import { getProject, getProjectRole, getVimDownloadUrl, getVimHistory } from '../api/vimServer'
@@ -15,7 +15,7 @@ import { elementMenu } from '../estimate/ui/menus'
 import { useElementsView } from '../estimate/ui/useElementsView'
 import { formatDateTime } from '../format'
 import { ViewerPane } from '../viewer/ViewerPane'
-import type { ViewerStatus } from '../viewer/ViewerPane'
+import type { ViewerStatus, ViewerTexts } from '../viewer/ViewerPane'
 
 type IWebglVim = VIM.Core.Webgl.IWebglVim
 
@@ -35,6 +35,9 @@ const VIEWER_MIN = 240
  * The project workspace: `[ estimate panel | 3D viewer | Cost Details ]` under
  * the top bar. This page owns what the panes share — the selection, the loaded
  * model, the estimate — so none of them has to know about the others.
+ *
+ * One instance per project (App keys it by the project id): nothing of one
+ * project, its role above all, may survive into the next.
  */
 export function ProjectPage({
   projectId,
@@ -122,6 +125,16 @@ export function ProjectPage({
   useEffect(() => () => setDebugEstimate(null), [])
 
   const { t } = est
+  const viewerTexts = useMemo(
+    (): ViewerTexts => ({
+      idle: t('No VIM in this project yet.'),
+      loading: t('Loading the snapshot…'),
+      loaded: t('Loaded'),
+      error: t('Could not load the snapshot.'),
+      resolving: t('Opening the project…'),
+    }),
+    [t],
+  )
   const modelPlaceholder = resolving
     ? t('Opening the project…')
     : sourceError || viewerStatus === 'error'
@@ -136,17 +149,17 @@ export function ProjectPage({
     <main className="page" data-testid="project-page">
       <header className="topbar">
         <Button variant="ghost" icon="back" data-testid="back-to-projects" onClick={onBack}>
-          Projects
+          {t('Projects')}
         </Button>
         <Label as="h1" variant="title" truncate data-testid="project-title">
-          {name || 'Project'}
+          {name || t('Project')}
         </Label>
         {snapshot ? (
           <Chip data-testid="snapshot-tag" tip={formatDateTime(snapshot.created)}>
             {snapshot.versionTag}
           </Chip>
         ) : (
-          <Chip data-testid="snapshot-tag">{resolving ? '…' : 'no VIM'}</Chip>
+          <Chip data-testid="snapshot-tag">{resolving ? '…' : t('no VIM')}</Chip>
         )}
         <Chip data-testid="role-badge">{role || '…'}</Chip>
         <div className="topbar-right">
@@ -154,7 +167,7 @@ export function ProjectPage({
             {auth.session?.name ?? ''}
           </Label>
           <Button variant="ghost" data-testid="sign-out" onClick={auth.signOut}>
-            Sign out
+            {t('Sign out')}
           </Button>
         </div>
       </header>
@@ -168,7 +181,6 @@ export function ProjectPage({
       >
         <Workspace
           modelPlaceholder={modelPlaceholder}
-          readOnly={role === 'Viewer'}
           viewer={(onContextMenu) => (
             <ViewerPane
               source={source}
@@ -182,6 +194,7 @@ export function ProjectPage({
               onStatus={setViewerStatus}
               frameElementsRef={frameElementsRef}
               onContextMenu={onContextMenu}
+              texts={viewerTexts}
             />
           )}
         />
@@ -196,7 +209,6 @@ export function ProjectPage({
  */
 function Workspace(props: {
   modelPlaceholder?: string
-  readOnly: boolean
   viewer: (onContextMenu: (x: number, y: number) => void) => JSX.Element
 }): JSX.Element {
   const ui = useEstimateUi()
@@ -263,7 +275,7 @@ function Workspace(props: {
         className="en-side"
         style={{ width: panelWidth ?? `${PANEL_INITIAL * 100}%`, minWidth: PANEL_MIN }}
       >
-        <EstimatePanel modelPlaceholder={props.modelPlaceholder} readOnly={props.readOnly} />
+        <EstimatePanel modelPlaceholder={props.modelPlaceholder} />
       </div>
       <div className="ds-split__handle" role="separator" aria-orientation="vertical" data-testid="panel-resizer" onPointerDown={panelDrag} />
       <div className="en-stage">

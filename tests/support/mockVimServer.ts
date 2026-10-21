@@ -38,7 +38,8 @@ export type MockBlob = {
 export type MockProject = {
   id: string
   name: string
-  role: 'Viewer' | 'Manager' | 'Admin'
+  /** 'Viewer', 'Manager' or 'Admin' on the real server; a test may hand out a role the app does not know. */
+  role: string
   latestVim: MockBlob | null
 }
 
@@ -63,6 +64,9 @@ export type RecordedWrite =
     }
   | { kind: 'put-batch'; namespace: string; entries: { key: string; value: unknown }[] }
   | { kind: 'delete'; namespace: string; keys: string[] }
+
+/** A data-store read as `failRead` and `holdRead` see it: a list (no key) or one entry. */
+export type PendingRead = { namespace: string; key?: string }
 
 /** A data-store write as `failWrite` sees it, before the mock acts on it. */
 export type PendingWrite = {
@@ -92,6 +96,18 @@ export type MockOptions = {
    * is recorded in `writes`. Undefined lets the write through.
    */
   failWrite?: (write: PendingWrite) => number | undefined
+  /**
+   * Called before every data-store read. A status code returned (e.g. 500)
+   * answers the read with that error instead. Undefined lets the read through.
+   */
+  failRead?: (read: PendingRead) => number | undefined
+  /**
+   * Called once a data-store read is answered from the store, before the reply
+   * is sent. A promise returned holds the reply until it settles, and the reply
+   * still carries the data of when the request came in: a read that arrives
+   * late with data that is out of date by then.
+   */
+  holdRead?: (read: PendingRead) => Promise<void> | undefined
 }
 
 export type MockHandle = {
@@ -189,6 +205,20 @@ export async function installMockVimServer(
       store.set(namespace, found)
     }
     return found
+  }
+
+  /** Answers a read `failRead` wants to fail; true when it did. */
+  const readRefused = async (route: Route, read: PendingRead): Promise<boolean> => {
+    const status = options.failRead?.(read)
+    if (status === undefined) return false
+    await route.fulfill(problem(status, 'Read refused', `The mock refused a read of ${read.namespace}.`))
+    return true
+  }
+
+  /** Sends a read's reply, after `holdRead` lets it go. */
+  const answerRead = async (route: Route, read: PendingRead, reply: Parameters<Route['fulfill']>[0]): Promise<void> => {
+    await options.holdRead?.(read)
+    await route.fulfill(reply)
   }
 
   /** Answers a write `failWrite` wants to fail; true when it did. */
@@ -348,15 +378,14 @@ export async function installMockVimServer(
     if (batch) {
       const namespace = decodeURIComponent(batch[1])
       if (method === 'GET') {
+        if (await readRefused(route, { namespace })) return
         // A list carries no ETags: the real server sends them only for a
         // single-entry read, which is the only read that can be written back.
         const entries = [...bucket(namespace)].map(([key, item]) => ({
           key,
           value: item.value,
         }))
-        await route.fulfill(
-          json(entries, 200, { 'X-Total-Count': String(entries.length) }),
-        )
+        await answerRead(route, { namespace }, json(entries, 200, { 'X-Total-Count': String(entries.length) }))
         return
       }
       if (method === 'PUT') {
@@ -406,12 +435,15 @@ export async function installMockVimServer(
       const key = decodeURIComponent(single[2])
 
       if (method === 'GET') {
+        if (await readRefused(route, { namespace, key })) return
         const existing = bucket(namespace).get(key)
         if (!existing) {
-          await route.fulfill(problem(404, 'Not Found', 'No such key.'))
+          await answerRead(route, { namespace, key }, problem(404, 'Not Found', 'No such key.'))
           return
         }
-        await route.fulfill(
+        await answerRead(
+          route,
+          { namespace, key },
           json({ key, value: existing.value }, 200, {
             ETag: `"${existing.version}"`,
             'Access-Control-Expose-Headers': 'ETag, X-Total-Count',

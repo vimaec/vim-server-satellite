@@ -125,8 +125,9 @@ export function CostCodesTab(): JSX.Element {
             toast(t('Select elements in the 3D view or the Elements tab first.'), 'warn')
             return
           }
-          current.assign(selection, { code: id })
-          toast(t('Cost code assigned to {n} elements.', { n: selection.length.toLocaleString() }), 'good')
+          if (current.assign(selection, { code: id })) {
+            toast(t('Cost code assigned to {n} elements.', { n: selection.length.toLocaleString() }), 'good')
+          }
         },
       },
       'separator',

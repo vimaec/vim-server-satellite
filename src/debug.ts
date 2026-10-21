@@ -16,6 +16,12 @@ export type DebugEstimate = {
   assignments: Record<string, Assignment>
   /** Excluded element indices, ascending. */
   hidden: number[]
+  /** Whether the UI offers writes right now (role, the active sheet's assignments, the model facts). */
+  canEdit: boolean
+  /** The active sheet's assignments: being read, here, or the read failed. */
+  sheetStatus: 'loading' | 'ready' | 'error'
+  /** How many whole reads of the estimate the page has taken in. */
+  loads: number
 }
 
 export type SatelliteDebug = {
@@ -38,6 +44,9 @@ export type DebugEstimateSource = {
   totals: Totals
   assignments: Map<string, Assignment>
   hidden: Set<number>
+  canEdit: boolean
+  sheetStatus: DebugEstimate['sheetStatus']
+  loads: number
 }
 
 let stateName = 'loading'
@@ -79,6 +88,9 @@ export function installDebugHook(): void {
         totals: { ...estimate.totals },
         assignments: Object.fromEntries(estimate.assignments),
         hidden: [...estimate.hidden].sort((a, b) => a - b),
+        canEdit: estimate.canEdit,
+        sheetStatus: estimate.sheetStatus,
+        loads: estimate.loads,
       },
     isElementHidden: (index) => estimate?.hidden.has(index) ?? false,
   }
