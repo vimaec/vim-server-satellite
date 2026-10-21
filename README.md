@@ -202,18 +202,22 @@ persistence:
 | `elementId` (`bigint`) | Revit `ElementId` | per document (`-1` means none) | shown in the tree and in Cost Details, and stored in each assignment for a person who reads the store |
 
 An element index is only meaningful for the model instance currently loaded — re-export the project
-and the indices move. So assignments are keyed by **UniqueId** (`src/estimate/keys.ts`):
+and the indices move. The ElementId is no better as a key: it is unique only inside one Revit
+document, so in a merged VIM two documents can share one. So an assignment is keyed by the **Revit
+UniqueId** and nothing else (`src/estimate/keys.ts`):
 
 ```ts
-elementKey(e) = e.uniqueId || (e.elementId !== '-1' ? `id-${e.elementId}` : `index-${e.index}`)
+elementKey(e) = e.uniqueId || null
 ```
 
-`||`, not `??`: vim-web reports a missing UniqueId as an empty string. The `id-` fallback covers
-source formats that have no UniqueId, and reads as the weaker thing it is. ElementId `-1` means "no
-Revit id at all", so it cannot key anything — every such element would share one key, `id--1` — and
-those fall back to the row index, which is **snapshot-local**: an assignment keyed that way does not
-survive a re-export. On load the app reads the active sheet's assignments and maps each key back to
-the element index of the loaded model.
+`||`, not `??`: vim-web reports a missing UniqueId as an empty string. An element with no UniqueId is
+still listed, counted and priced, as unassigned and included, but nothing can be stored for it: its
+include box, work package, cost code, extra and note are disabled with a tip that says why, the
+menu's write verbs are off when it is the only target, and bulk actions on a selection or a group
+skip it (their toast counts only the elements written). The element index is used only at runtime,
+to address elements in vim-web within the loaded snapshot (selection, colours, hiding, tree rows);
+nothing stored or kept across sessions depends on it. On load the app reads the active sheet's
+assignments and finds each element's entry by its UniqueId.
 
 ### The estimate
 
@@ -264,7 +268,7 @@ stored anywhere else. Ids are short random strings that the client makes, with a
 | `estimate.workPackages` | work package id | `{ en, ja, sort }` |
 | `estimate.costCodes` | cost code id | `{ code, name, descr, discipline, grp, unit, basis, price, laborDays, laborRate, matAdd, labAdd }` |
 | `estimate.sheets` | sheet id | `{ name, sort, currency, markups: [{ id, name, pct }] }` |
-| `estimate.sheet.<sheetId>` | element key: UniqueId, else `id-<elementId>`, else `index-<row>` | `{ wp?, code?, extra?, note?, hidden?, elementId, by?, at }` |
+| `estimate.sheet.<sheetId>` | Revit UniqueId (elements without one are not stored) | `{ wp?, code?, extra?, note?, hidden?, elementId, by?, at }` |
 
 `basis` is `count`, `length`, `area`, `volume` or `lump`. `matAdd` and `labAdd` are fractions
 (`0.1` is 10 %); the UI shows them as percent. A markup `pct` is a percent. `currency` is an ISO code
@@ -377,7 +381,8 @@ direct   = Σ amount over all elements (excluded elements still count)
 total    = direct × (1 + Σ markup % / 100)
 ```
 
-A `lump` code charges its unit price once, on the lowest element index that carries it. An element
+A `lump` code charges its unit price once, on the element with the lowest key (UniqueId, ordinal
+compare) that carries it, so the same element carries it in every export. An element
 whose code needs a quantity that the element does not have is **missing**: it costs only its extra,
 and the footer counts it. Display "Costs" colours each coded element by its rank among the coded
 elements (green over the lowest quarter, amber at the median, orange at the 90th percentile, red
@@ -546,6 +551,8 @@ The specs:
 | `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost and its legend, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Reload (changes made on the server, a deleted active sheet, a Viewer; an edit still being written, an edit made while it reads), the viewer background, the ghost colour, a Display colour sampled on screen against its swatch, the DS control bar, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
 | `estimate-pricing.spec.ts` | The pure functions: pricing, totals and markups, the lump-sum and missing rules, the cost ramp, the data colours (OKLCH lift, categorical palette), colours by level, grouping and search, the cost code tree, number parsing |
 | `estimate-quantities.spec.ts` | `readFacts()` on the fixture: metric lengths, areas and volumes, material fallbacks, names from the BIM tables |
+| `write-resilience.spec.ts` | A busy server: bulk writes keep at most `WRITE_CONCURRENCY` requests in flight, transient failures are retried and land, a failure after every retry is rolled back with a toast, conditional sheet writes are read back instead of resent, a `401` is not retried |
+| `element-keys.spec.ts` | Element identity: an element with no UniqueId (dropped through a dev-only test seam) is listed and priced, its write controls are disabled with a reason, and bulk writes skip it |
 | `mock-server.spec.ts` | The harness itself: Range replies, data store preconditions, the bearer check |
 | `subpath/smoke.spec.ts` | A `BASE_PATH` build under `vite preview`: boot, favicon, the Entra redirect page |
 
@@ -664,10 +671,9 @@ This is a sample, and it stops where a product would keep going.
 - **A UniqueId can repeat across linked models.** A Revit `UniqueId` is unique inside one document,
   not across a set of linked documents, so in a federated model two elements can share an
   assignment key. A real app would prefix the key with the source document id.
-- **Elements with no UniqueId fall back to `id-<elementId>`**, which is not stable across a
-  re-export, and an element with no Revit id either falls back to `index-<row>`, which is only
-  meaningful for the loaded snapshot. Those assignments can drift onto the wrong element, or be
-  lost, when a new snapshot lands.
+- **Elements with no UniqueId cannot be estimated** beyond their default (unassigned, included).
+  Entries stored under the older `id-…` or `index-…` keys are ignored; they are not migrated or
+  deleted.
 - **No Entra end-session on sign out.** The app forgets its own tokens, but the Microsoft session in
   the browser stays, so the next sign-in is usually silent, and signing in as a different user needs
   a Microsoft sign-out.

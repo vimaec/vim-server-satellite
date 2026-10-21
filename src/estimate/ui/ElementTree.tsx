@@ -238,7 +238,7 @@ export function ElementTree({ placeholder, open, setOpen }: ElementTreeProps): J
           <Checkbox
             state={root.count === 0 ? 'off' : headState}
             className={includeClass(headState)}
-            disabled={!canEdit || root.count === 0}
+            disabled={!canEdit || root.count === 0 || root.unkeyed === root.count}
             ariaLabel={t('Included')}
             tip={`${t('Include')} / ${t('Exclude')}`}
             data-testid="tree-check-all"

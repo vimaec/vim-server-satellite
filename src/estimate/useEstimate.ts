@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as VIM from 'vim-web'
 import { useAuth } from '../auth/AuthProvider'
-import { DEFAULT_CURRENCY, makeT, money as formatMoney } from './i18n'
+import { DEFAULT_CURRENCY, NO_KEY_MANY, NO_KEY_ONE, makeT, money as formatMoney } from './i18n'
 import type { Translator } from './i18n'
 import { loadActiveSheet, loadLang, saveActiveSheet, saveLang } from './prefs'
 import { codeUsage, computeTotals, priceRows } from './pricing'
@@ -183,13 +183,21 @@ export type Estimate = {
   hidden: Set<number>
 
   /**
-   * Set fields on elements in the active sheet; `null` clears a field. False
-   * when refused (no elements, read-only, the sheet or the facts not here yet).
+   * The elements of `elements` that estimate data can be stored for: those
+   * with a Revit UniqueId (see keys.ts). Unique, in their first order. A bulk
+   * action writes these and silently skips the rest, so its message counts
+   * these.
+   */
+  storable: (elements: readonly number[]) => number[]
+  /**
+   * Set fields on elements in the active sheet; `null` clears a field.
+   * Elements with no UniqueId are skipped (see `storable`). False when refused
+   * (no storable element, read-only, the sheet or the facts not here yet).
    */
   assign: (elements: readonly number[], patch: AssignmentPatch) => boolean
   /** Include (true) or exclude (false) elements. */
   setIncluded: (elements: readonly number[], included: boolean) => void
-  /** Ctrl+X: included when every one of them is excluded, else excluded. */
+  /** Ctrl+X: included when every storable one of them is excluded, else excluded. */
   toggleIncluded: (elements: readonly number[]) => void
 
   /** The cost code id Copy Cost Code holds, or null. */
@@ -601,26 +609,37 @@ export function useEstimate(
 
   // ---- assignments ---------------------------------------------------------------------------
 
+  const storable = useCallback((elements: readonly number[]): number[] => {
+    const facts = factsRef.current
+    return [...new Set(elements)].filter((index) => !!facts.get(index)?.key)
+  }, [])
+
   const assign = useCallback(
     (elements: readonly number[], patch: AssignmentPatch): boolean => {
-      if (!writable() || elements.length === 0) return false
+      if (!writable()) return false
       const current = activeRef.current
       const map = current.assignments
       const sheet = sheetsRef.current.find((entry) => entry.id === current.id)
       if (!map || !sheet) return false
+      // Key -> ElementId, for the elements with a key: one without has nowhere to be
+      // stored (see keys.ts). A UniqueId repeated across linked models is one entry.
+      const keyed = new Map<string, string>()
+      for (const index of elements) {
+        const fact = factsRef.current.get(index)
+        if (fact?.key && !keyed.has(fact.key)) keyed.set(fact.key, fact.elementId)
+      }
+      if (keyed.size === 0) return false
       const at = new Date().toISOString()
       let next: Map<string, Assignment> | null = null
       const changes: [string, Assignment | null, Assignment | undefined][] = []
-      for (const index of new Set(elements)) {
-        const fact = factsRef.current.get(index)
-        if (!fact) continue
-        const before = map.get(fact.key)
-        const after = applyPatch(before, patch, { elementId: fact.elementId, by: byRef.current, at })
+      for (const [key, elementId] of keyed) {
+        const before = map.get(key)
+        const after = applyPatch(before, patch, { elementId, by: byRef.current, at })
         if (after === undefined) continue
         next ??= new Map(map)
-        if (after) next.set(fact.key, after)
-        else next.delete(fact.key)
-        changes.push([fact.key, after, before])
+        if (after) next.set(key, after)
+        else next.delete(key)
+        changes.push([key, after, before])
       }
       // Nothing to change: the elements already say so.
       if (!next) return true
@@ -656,14 +675,17 @@ export function useEstimate(
   const toggleIncluded = useCallback(
     (elements: readonly number[]) => {
       const map = activeRef.current.assignments
-      if (elements.length === 0 || !map) return
-      const allExcluded = elements.every((index) => {
-        const fact = factsRef.current.get(index)
-        return fact ? map.get(fact.key)?.hidden === true : true
+      // Elements with no key are always included and cannot change: they must not
+      // count, or a selection holding one could never be included again.
+      const keyed = storable(elements)
+      if (keyed.length === 0 || !map) return
+      const allExcluded = keyed.every((index) => {
+        const key = factsRef.current.get(index)?.key
+        return key ? map.get(key)?.hidden === true : true
       })
-      assign(elements, { hidden: !allExcluded })
+      assign(keyed, { hidden: !allExcluded })
     },
-    [assign],
+    [assign, storable],
   )
 
   // ---- sheets --------------------------------------------------------------------------------
@@ -1024,8 +1046,8 @@ export function useEstimate(
     (elements: readonly number[]): Feedback => {
       const t = tNow()
       if (elements.length !== 1) return { tone: 'warn', text: t('Select one element to copy its cost code.') }
-      const fact = factsRef.current.get(elements[0])
-      const id = fact ? activeRef.current.assignments?.get(fact.key)?.code : undefined
+      const key = factsRef.current.get(elements[0])?.key
+      const id = key ? activeRef.current.assignments?.get(key)?.code : undefined
       const code = id ? costCodesRef.current.get(id) : undefined
       if (!code) return { tone: 'warn', text: t('This element has no cost code.') }
       copiedRef.current = code.id
@@ -1043,7 +1065,10 @@ export function useEstimate(
       if (elements.length === 0) {
         return { tone: 'warn', text: t('Select elements in the 3D view or the Elements tab first.') }
       }
-      if (!assign(elements, { code: code.id })) {
+      // The toast counts what is written: elements with no UniqueId are skipped.
+      const keyed = storable(elements)
+      if (keyed.length === 0) return { tone: 'warn', text: t(elements.length === 1 ? NO_KEY_ONE : NO_KEY_MANY) }
+      if (!assign(keyed, { code: code.id })) {
         const text = readOnlyRef.current
           ? t('Read only: your project role is {role}.', { role: roleRef.current })
           : t('The sheet is not ready yet. Try again in a moment.')
@@ -1053,11 +1078,11 @@ export function useEstimate(
         tone: 'good',
         text: t('Cost code {code} pasted on {n} elements.', {
           code: code.code,
-          n: elements.length.toLocaleString(),
+          n: keyed.length.toLocaleString(),
         }),
       }
     },
-    [assign, tNow],
+    [assign, storable, tNow],
   )
 
   // ---- language ------------------------------------------------------------------------------
@@ -1155,6 +1180,7 @@ export function useEstimate(
       priced,
       totals,
       hidden,
+      storable,
       assign,
       setIncluded,
       toggleIncluded,
@@ -1201,6 +1227,7 @@ export function useEstimate(
       sheetStatus,
       sheets,
       status,
+      storable,
       switchSheet,
       t,
       toggleIncluded,

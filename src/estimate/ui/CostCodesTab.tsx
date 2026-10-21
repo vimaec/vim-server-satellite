@@ -10,6 +10,7 @@ import { Button, Empty, Menu, Search, Segmented, confirm, prompt, toast } from '
 import type { MenuEntry } from '../../ds'
 import { buildCodeTree, costCodeLabel, visibleCodeRows } from '../grouping'
 import type { CodeTreeNode } from '../grouping'
+import { NO_KEY_MANY, NO_KEY_ONE } from '../i18n'
 import { CodeRow } from './CodeRow'
 import type { CodeRowContext } from './CodeRow'
 import { useEstimateUi } from './context'
@@ -125,8 +126,14 @@ export function CostCodesTab(): JSX.Element {
             toast(t('Select elements in the 3D view or the Elements tab first.'), 'warn')
             return
           }
-          if (current.assign(selection, { code: id })) {
-            toast(t('Cost code assigned to {n} elements.', { n: selection.length.toLocaleString() }), 'good')
+          // Elements with no UniqueId are skipped, so the toast counts the others.
+          const keyed = current.storable(selection)
+          if (keyed.length === 0) {
+            toast(t(selection.length === 1 ? NO_KEY_ONE : NO_KEY_MANY), 'warn')
+            return
+          }
+          if (current.assign(keyed, { code: id })) {
+            toast(t('Cost code assigned to {n} elements.', { n: keyed.length.toLocaleString() }), 'good')
           }
         },
       },

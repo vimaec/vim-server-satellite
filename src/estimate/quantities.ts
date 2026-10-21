@@ -64,15 +64,47 @@ export async function buildFacts(
   vim: IWebglVim,
   isCancelled: () => boolean = () => false,
 ): Promise<Map<number, ElementFacts>> {
+  const stripped = testNoUniqueId()
   const scope: ScopeElement[] = vim
     .getAllElements()
     .filter((element) => element.hasGeometry)
-    .map((element) => ({
-      index: element.element,
-      elementId: String(element.elementId),
-      uniqueId: element.elementUniqueId || undefined,
-    }))
+    .map((element) => {
+      const elementId = String(element.elementId)
+      return {
+        index: element.element,
+        elementId,
+        uniqueId: stripped.has(elementId) ? undefined : element.elementUniqueId || undefined,
+      }
+    })
   return readFacts(vim.bim, scope, isCancelled)
+}
+
+declare global {
+  interface Window {
+    /**
+     * TEST ONLY, dev server only: ElementIds whose UniqueId `buildFacts` drops.
+     * See `testNoUniqueId`.
+     */
+    __vimSatelliteTestNoUniqueId?: unknown
+  }
+}
+
+/**
+ * TEST ONLY. The ElementIds whose UniqueId `buildFacts` drops, so an
+ * end-to-end test can check how the app treats an element that has none: the
+ * Tiny House fixture gives every element one, and editing the binary fixture
+ * would hide what the test does. Playwright sets
+ * `window.__vimSatelliteTestNoUniqueId` with `addInitScript` before the page
+ * loads (tests/element-keys.spec.ts).
+ *
+ * Read only by the dev server (`import.meta.env.DEV`), which is what Playwright
+ * runs against: a production build replaces the flag with `false` and drops
+ * the read, so a deployed app never looks at the global.
+ */
+function testNoUniqueId(): ReadonlySet<string> {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return new Set()
+  const ids = window.__vimSatelliteTestNoUniqueId
+  return new Set(Array.isArray(ids) ? ids.map(String) : [])
 }
 
 /** A relation column holds -1 (or nothing) for "none". */

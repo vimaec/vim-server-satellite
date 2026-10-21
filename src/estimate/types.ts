@@ -122,10 +122,17 @@ export type AssignmentPatch = {
 
 /** What the estimate reads of one element of the loaded VIM (see quantities.ts). */
 export type ElementFacts = {
-  /** Row index in the VIM element table: the handle the viewer takes. */
+  /**
+   * Row index in the VIM element table: the handle the viewer takes. Valid for
+   * the loaded snapshot only, so nothing stored or kept across sessions uses it.
+   */
   index: number
-  /** The data-store key (see keys.ts). */
-  key: string
+  /**
+   * The data-store key: the Revit UniqueId (see keys.ts). Null when the element
+   * has none: it is priced as unassigned and included, and nothing is stored
+   * for it.
+   */
+  key: string | null
   /** Revit ElementId as text. */
   elementId: string
   name: string

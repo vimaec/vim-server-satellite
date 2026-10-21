@@ -164,6 +164,11 @@ export type GroupNode = {
   hidden: number
   /** Members with a code but no quantity (the row gets the warn tint). */
   missing: number
+  /**
+   * Members with no Revit UniqueId, which nothing can be stored for (see
+   * keys.ts). When every member is one, the row's write controls are disabled.
+   */
+  unkeyed: number
 }
 
 /** An element row: the leaf. */
@@ -259,9 +264,14 @@ function sharedOf(values: (string | null)[]): string {
   return any ? (first ?? '') : ''
 }
 
-function aggregate(node: GroupNode, priced: ReadonlyMap<number, PricedRow>): void {
+function aggregate(
+  node: GroupNode,
+  facts: ReadonlyMap<number, ElementFacts>,
+  priced: ReadonlyMap<number, PricedRow>,
+): void {
   const rows = node.elements.map((index) => priced.get(index) as PricedRow)
   node.count = rows.length
+  node.unkeyed = node.elements.filter((index) => !facts.get(index)?.key).length
   node.amount = rows.reduce((sum, row) => sum + row.amount, 0)
   node.hidden = rows.filter((row) => row.hidden).length
   node.missing = rows.filter((row) => row.missing).length
@@ -288,6 +298,7 @@ function emptyGroup(key: string, level: GroupLevel | null, value: string, depth:
     code: '',
     hidden: 0,
     missing: 0,
+    unkeyed: 0,
   }
 }
 
@@ -316,7 +327,7 @@ export function buildTree(input: TreeInput): GroupNode {
   const root = emptyGroup('root', null, '', -1)
   const fill = (parent: GroupNode, members: ElementFacts[], depth: number): void => {
     parent.elements = members.map((fact) => fact.index)
-    aggregate(parent, priced)
+    aggregate(parent, facts, priced)
     if (depth >= nesting.length) {
       parent.children = members.map((fact) => ({
         kind: 'element',

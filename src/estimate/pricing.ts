@@ -8,8 +8,8 @@
  * - material = qty × unit price × (1 + material adders)
  * - labor    = qty × labor factor × labor rate × (1 + labor adders)
  * - amount   = material + labor + extra
- * - a lump-sum code charges its price once, on the lowest element index that
- *   carries it;
+ * - a lump-sum code charges its price once, on one element that carries it
+ *   (see `lumpCarriers`);
  * - "missing" = the element has a code but no quantity for its basis: it then
  *   costs only its extra;
  * - direct = Σ amount (excluded elements still count); total = direct ×
@@ -48,11 +48,56 @@ function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+/** The assignment of an element; none for an element with no key, which nothing can be stored for. */
+function assignmentOf(
+  fact: ElementFacts,
+  assignments: ReadonlyMap<string, Assignment>,
+): Assignment | undefined {
+  return fact.key === null ? undefined : assignments.get(fact.key)
+}
+
+/**
+ * Whether `a` carries a lump-sum code before `b`: the lower element key
+ * (UniqueId, ordinal compare), so the element that shows the charge is the
+ * same in every export of the model. The row index would move it around.
+ *
+ * Ties: a keyed element goes before one with no key (which cannot carry a code
+ * today, as nothing is stored for it; the rule only keeps the choice total).
+ * Two elements with the same key (a UniqueId repeated across linked models)
+ * share one assignment; between those, and between two unkeyed elements, the
+ * lower row index decides. That only picks which of them shows the charge in
+ * this snapshot; the total is the same either way.
+ */
+function carriesBefore(a: ElementFacts, b: ElementFacts): boolean {
+  if (a.key !== b.key) {
+    if (a.key === null) return false
+    if (b.key === null) return true
+    return a.key < b.key
+  }
+  return a.index < b.index
+}
+
+/** Per lump-sum code id: the row index of the one element that is charged its price. */
+function lumpCarriers(
+  facts: ReadonlyMap<number, ElementFacts>,
+  assignments: ReadonlyMap<string, Assignment>,
+  costCodes: ReadonlyMap<string, CostCode>,
+): Map<string, number> {
+  const carrier = new Map<string, ElementFacts>()
+  for (const fact of facts.values()) {
+    const id = assignmentOf(fact, assignments)?.code
+    if (!id || costCodes.get(id)?.basis !== 'lump') continue
+    const current = carrier.get(id)
+    if (current === undefined || carriesBefore(fact, current)) carrier.set(id, fact)
+  }
+  return new Map([...carrier].map(([id, fact]) => [id, fact.index]))
+}
+
 /**
  * One priced row per element in `facts` (an element without an assignment
- * costs 0). A code or work package id that no longer exists counts as none:
- * someone deleted it and the clean-up of the assignments has not reached this
- * page yet.
+ * costs 0; so does one with no key, which cannot have one). A code or work
+ * package id that no longer exists counts as none: someone deleted it and the
+ * clean-up of the assignments has not reached this page yet.
  *
  * O(n) over the elements: cheap enough to redo on every edit of a 20k-element
  * model, which keeps the result simply derived from the inputs.
@@ -63,18 +108,11 @@ export function priceRows(
   costCodes: ReadonlyMap<string, CostCode>,
   workPackages?: ReadonlyMap<string, WorkPackage>,
 ): Map<number, PricedRow> {
-  // The lump rule: the lowest element index carrying each lump-sum code.
-  const lumpOwner = new Map<string, number>()
-  for (const fact of facts.values()) {
-    const id = assignments.get(fact.key)?.code
-    if (!id || costCodes.get(id)?.basis !== 'lump') continue
-    const owner = lumpOwner.get(id)
-    if (owner === undefined || fact.index < owner) lumpOwner.set(id, fact.index)
-  }
+  const lumpOwner = lumpCarriers(facts, assignments, costCodes)
 
   const rows = new Map<number, PricedRow>()
   for (const fact of facts.values()) {
-    const assignment = assignments.get(fact.key)
+    const assignment = assignmentOf(fact, assignments)
     const code = assignment?.code ? costCodes.get(assignment.code) : undefined
     const wp =
       assignment?.wp && (!workPackages || workPackages.has(assignment.wp)) ? assignment.wp : null

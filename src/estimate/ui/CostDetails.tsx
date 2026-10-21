@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconButton, Label, Panel, Select, TextArea, cx } from '../../ds'
 import type { SelectOption } from '../../ds'
-import { categoryLabel, qtyText } from '../i18n'
+import { NO_KEY_MANY, NO_KEY_ONE, categoryLabel, qtyText } from '../i18n'
 import type { Translator } from '../i18n'
 import { costCodeLabel, workPackageName } from '../grouping'
 import { BASIS_UNIT } from '../types'
@@ -266,9 +266,14 @@ function ElementView({ entry }: { entry: Shown }): JSX.Element {
 function Fields({ rows }: { rows: Shown[] }): JSX.Element {
   const ui = useEstimateUi()
   const { est } = ui
-  const { t, canEdit } = est
+  const { t } = est
   const elements = rows.map((entry) => entry.facts.index)
   const varies = t('varies')
+  // Nothing can be stored for elements with no UniqueId (keys.ts): the fields are disabled
+  // when every shown element is one, and the writes skip them when only some are.
+  const noKey = est.storable(elements).length === 0
+  const noKeyTip = noKey ? t(elements.length === 1 ? NO_KEY_ONE : NO_KEY_MANY) : undefined
+  const canEdit = est.canEdit && !noKey
 
   const wp = common(rows, (entry) => entry.row.wp ?? NONE)
   const packages = [...est.workPackages.values()].sort((a, b) => a.sort - b.sort || (a.id < b.id ? -1 : 1))
@@ -299,7 +304,7 @@ function Fields({ rows }: { rows: Shown[] }): JSX.Element {
   const note = common(rows, (entry) => entry.row.note)
 
   return (
-    <div className="ed-fields">
+    <div className="ed-fields" data-ds-tip={noKeyTip}>
       <div className="ed-line">
         <span className="ed-k">{t('Work package')}</span>
         <Select

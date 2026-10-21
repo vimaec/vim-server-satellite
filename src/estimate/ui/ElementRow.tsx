@@ -11,7 +11,7 @@ import { memo } from 'react'
 import type { MouseEvent } from 'react'
 import { Checkbox, Select, cx } from '../../ds'
 import type { CheckboxState, SelectOption } from '../../ds'
-import { amount, qtyText } from '../i18n'
+import { NO_KEY_MANY, NO_KEY_ONE, amount, qtyText } from '../i18n'
 import { MIXED, checkState, groupLabel } from '../grouping'
 import type { LabelContext, TreeNode } from '../grouping'
 import type { Translator } from '../i18n'
@@ -83,6 +83,11 @@ export const ElementRow = memo(function ElementRow(props: ElementRowProps): JSX.
   const code = group ? group.code : (leaf?.row.code ?? '')
   const qty = group ? group.qty : (leaf?.row.qty ?? null)
   const wpGroupId = group && group.level === 'wp' && group.value ? group.value : null
+  // Nothing can be stored for an element with no UniqueId (keys.ts): its controls, and
+  // those of a group made only of such elements, are disabled and say why.
+  const noKey = leaf ? leaf.facts.key === null : group !== null && group.count > 0 && group.unkeyed === group.count
+  const noKeyTip = noKey ? t(leaf ? NO_KEY_ONE : NO_KEY_MANY) : undefined
+  const writable = canEdit && !noKey
 
   return (
     <div
@@ -109,8 +114,9 @@ export const ElementRow = memo(function ElementRow(props: ElementRowProps): JSX.
           <Checkbox
             state={check}
             className={includeClass(check)}
-            disabled={!canEdit}
+            disabled={!writable}
             ariaLabel={t('Included')}
+            tip={noKeyTip}
             data-testid="row-check"
             onChange={(next) => ctx.onCheck(node, next === 'on')}
           />
@@ -160,7 +166,7 @@ export const ElementRow = memo(function ElementRow(props: ElementRowProps): JSX.
       <span className="ds-tree__cell en-c-count">{group ? group.count.toLocaleString() : ''}</span>
       <span className="ds-tree__cell en-c-amount">{amount(node.kind === 'group' ? node.amount : node.row.amount)}</span>
       <span className="ds-tree__cell en-c-qty">{qtyText(qty)}</span>
-      <span className="ds-tree__cell en-ctl en-c-wp" onClick={stop}>
+      <span className="ds-tree__cell en-ctl en-c-wp" data-ds-tip={noKeyTip} onClick={stop}>
         <Select
           inline
           block
@@ -170,13 +176,13 @@ export const ElementRow = memo(function ElementRow(props: ElementRowProps): JSX.
           ]}
           value={wp && wp !== MIXED ? wp : null}
           placeholder={wp === MIXED ? t('(mixed)') : '—'}
-          disabled={!canEdit}
+          disabled={!writable}
           ariaLabel={t('Work package')}
           data-testid="row-wp"
           onChange={(id) => ctx.onWorkPackage(node, id)}
         />
       </span>
-      <span className="ds-tree__cell en-ctl en-c-code" onClick={stop}>
+      <span className="ds-tree__cell en-ctl en-c-code" data-ds-tip={noKeyTip} onClick={stop}>
         <Select
           inline
           block
@@ -186,30 +192,30 @@ export const ElementRow = memo(function ElementRow(props: ElementRowProps): JSX.
           ]}
           value={code && code !== MIXED ? code : null}
           placeholder={code === MIXED ? t('(mixed)') : '—'}
-          disabled={!canEdit}
+          disabled={!writable}
           ariaLabel={t('Cost code')}
           data-testid="row-code"
           onChange={(id) => ctx.onCode(node, id)}
         />
       </span>
-      <span className="ds-tree__cell en-ctl en-c-extra" onClick={stop}>
+      <span className="ds-tree__cell en-ctl en-c-extra" data-ds-tip={noKeyTip} onClick={stop}>
         {leaf ? (
           <InlineNumber
             value={leaf.row.extra}
             format={(value) => String(value)}
-            disabled={!canEdit}
+            disabled={!writable}
             ariaLabel={t('Extra ¥')}
             data-testid="row-extra"
             onCommit={(value) => ctx.onExtra(leaf.index, value)}
           />
         ) : null}
       </span>
-      <span className="ds-tree__cell en-ctl en-c-note" onClick={stop}>
+      <span className="ds-tree__cell en-ctl en-c-note" data-ds-tip={noKeyTip} onClick={stop}>
         {leaf ? (
           <InlineText
             value={leaf.row.note}
             maxLength={500}
-            disabled={!canEdit}
+            disabled={!writable}
             ariaLabel={t('Note')}
             data-testid="row-note"
             onCommit={(text) => ctx.onNote(leaf.index, text)}

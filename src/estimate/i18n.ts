@@ -10,6 +10,15 @@
  */
 import type { Basis, Lang } from './types'
 
+/**
+ * Why an element's write controls are disabled: it has no Revit UniqueId, the
+ * only key that may be stored (see keys.ts). Constants, as several components
+ * show them and a typo would silently drop the translation.
+ */
+export const NO_KEY_ONE = 'This element has no Revit UniqueId, so estimate data cannot be stored for it.'
+/** The same, for a group, a selection or a menu target where no element has one. */
+export const NO_KEY_MANY = 'These elements have no Revit UniqueId, so estimate data cannot be stored for them.'
+
 /** Strings of the ported features only (no export, project file, filter builder, Parameters view). */
 const JA: Record<string, string> = {
   // Panel, tabs, total
@@ -100,6 +109,8 @@ const JA: Record<string, string> = {
   'Paste Cost Code': '単価コードを貼り付け',
   'Select one element to copy its cost code.': '単価コードをコピーする要素を 1 つ選択してください。',
   'This element has no cost code.': 'この要素には単価コードがありません。',
+  [NO_KEY_ONE]: 'この要素には Revit の UniqueId がないため、積算データを保存できません。',
+  [NO_KEY_MANY]: 'これらの要素には Revit の UniqueId がないため、積算データを保存できません。',
   'Cost code {code} copied.': '単価コード {code} をコピーしました。',
   'Copy a cost code first: select one element and press Ctrl+C.':
     '先に単価コードをコピーしてください：要素を 1 つ選択して Ctrl+C を押します。',

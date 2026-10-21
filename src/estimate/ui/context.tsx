@@ -9,6 +9,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from '../../ds'
+import { NO_KEY_MANY, NO_KEY_ONE } from '../i18n'
 import type { Estimate, Feedback } from '../useEstimate'
 import { EditCostCodeDialog } from './EditCostCodeDialog'
 import { SetCostCodeDialog } from './SetCostCodeDialog'
@@ -26,9 +27,12 @@ export type EstimateUi = {
   /** The same, for membership tests. */
   selected: ReadonlySet<number>
   select: (indices: readonly number[], mode?: SelectMode) => void
-  /** Set Cost Code… for these elements (a warning toast when there are none). */
+  /**
+   * Set Cost Code… for those of these elements that have a Revit UniqueId (the
+   * others are skipped); a warning toast when there are none.
+   */
   openCostCode: (elements: readonly number[]) => void
-  /** Set Work Package… for these elements. */
+  /** Set Work Package… for these elements, as openCostCode. */
   openWorkPackage: (elements: readonly number[]) => void
   /** Edit… one cost code in a form. */
   openEditCode: (id: string) => void
@@ -96,24 +100,39 @@ export function EstimateUiProvider(props: EstimateUiProviderProps): JSX.Element 
 
   const tRef = useRef(t)
   tRef.current = t
-  /** As the original: a "Set …" dialog with nothing to set it on is a warning, not a dialog. */
-  const needElements = useCallback((elements: readonly number[]): boolean => {
-    if (elements.length) return true
-    toast(tRef.current('Select elements in the 3D view or the Elements tab first.'), 'warn')
-    return false
-  }, [])
+  const storable = est.storable
+  /**
+   * The elements a "Set …" dialog writes: those with a Revit UniqueId, so its
+   * title counts what it will change. As the original, a dialog with nothing
+   * to set it on is a warning, not a dialog; null then.
+   */
+  const dialogElements = useCallback(
+    (elements: readonly number[]): number[] | null => {
+      if (!elements.length) {
+        toast(tRef.current('Select elements in the 3D view or the Elements tab first.'), 'warn')
+        return null
+      }
+      const keyed = storable(elements)
+      if (keyed.length) return keyed
+      toast(tRef.current(elements.length === 1 ? NO_KEY_ONE : NO_KEY_MANY), 'warn')
+      return null
+    },
+    [storable],
+  )
 
   const openCostCode = useCallback(
     (elements: readonly number[]) => {
-      if (needElements(elements)) setDialog({ kind: 'code', elements: [...elements] })
+      const keyed = dialogElements(elements)
+      if (keyed) setDialog({ kind: 'code', elements: keyed })
     },
-    [needElements],
+    [dialogElements],
   )
   const openWorkPackage = useCallback(
     (elements: readonly number[]) => {
-      if (needElements(elements)) setDialog({ kind: 'wp', elements: [...elements] })
+      const keyed = dialogElements(elements)
+      if (keyed) setDialog({ kind: 'wp', elements: keyed })
     },
-    [needElements],
+    [dialogElements],
   )
   const openEditCode = useCallback((id: string) => setDialog({ kind: 'edit', id }), [])
   const close = useCallback(() => setDialog(null), [])
@@ -164,7 +183,10 @@ function useShortcuts(ui: EstimateUi): void {
       event.preventDefault()
       if (key === 'c') notify(est.copyCode(selection))
       else if (key === 'v') notify(est.pasteCode(selection))
-      else if (selection.length) est.toggleIncluded(selection)
+      else if (!selection.length) return
+      else if (est.storable(selection).length) est.toggleIncluded(selection)
+      // Only elements with no UniqueId: say why nothing happens, as Paste does.
+      else notify({ tone: 'warn', text: est.t(selection.length === 1 ? NO_KEY_ONE : NO_KEY_MANY) })
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

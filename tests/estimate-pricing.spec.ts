@@ -113,19 +113,76 @@ test.describe('pricing', () => {
     expect([0, 1, 2].map((i) => rows.get(i)!.amount)).toEqual([2, 10, 3])
   })
 
-  test('a lump sum is charged once, on the lowest element index', () => {
-    const facts = factsOf([fact(7), fact(3), fact(5), fact(9)])
+  test('a lump sum is charged once, on the lowest element key, not the lowest index', () => {
+    // Keys run against the indices: index 7 has the lowest key, index 3 the highest.
+    const facts = factsOf([
+      fact(7, { key: 'a-7' }),
+      fact(3, { key: 'c-3' }),
+      fact(5, { key: 'b-5' }),
+      fact(9, { key: 'a-9' }),
+    ])
     const codes = new Map([['lump', code('lump', { basis: 'lump', price: 1000 })]])
     const assignments = new Map(
-      [7, 3, 5].map((i) => [`u-${i}`, assigned({ code: 'lump' })] as const),
+      ['a-7', 'c-3', 'b-5'].map((key) => [key, assigned({ code: 'lump' })] as const),
     )
     const rows = priceRows(facts, assignments, codes)
-    expect(rows.get(3)!.amount).toBe(1000)
-    expect(rows.get(3)!.qty).toBe(1)
+    expect(rows.get(7)!.amount).toBe(1000)
+    expect(rows.get(7)!.qty).toBe(1)
     expect(rows.get(5)!.qty).toBe(0)
-    expect(rows.get(7)!.amount).toBe(0)
+    expect(rows.get(3)!.amount).toBe(0)
     expect(rows.get(9)!.code).toBeNull()
     expect(computeTotals(rows, []).direct).toBe(1000)
+
+    // The same model exported again: other row indices, the same keys. The charge stays on 'a-7'.
+    const reexported = factsOf([fact(0, { key: 'c-3' }), fact(1, { key: 'b-5' }), fact(2, { key: 'a-7' })])
+    const again = priceRows(reexported, assignments, codes)
+    expect(again.get(2)!.amount).toBe(1000)
+    expect(computeTotals(again, []).direct).toBe(1000)
+  })
+
+  test('the lump carrier compares keys ordinally, and a repeated key falls back to the index', () => {
+    const codes = new Map([['lump', code('lump', { basis: 'lump', price: 1000 })]])
+    // Ordinal: 'B' (0x42) sorts before 'a' (0x61), as a locale compare would not have it.
+    const ordinal = priceRows(
+      factsOf([fact(0, { key: 'a' }), fact(1, { key: 'B' })]),
+      new Map([
+        ['a', assigned({ code: 'lump' })],
+        ['B', assigned({ code: 'lump' })],
+      ]),
+      codes,
+    )
+    expect(ordinal.get(1)!.qty).toBe(1)
+    expect(ordinal.get(0)!.qty).toBe(0)
+    // One UniqueId on two elements (linked models): one assignment, one charge.
+    const repeated = priceRows(
+      factsOf([fact(4, { key: 'same' }), fact(2, { key: 'same' })]),
+      new Map([['same', assigned({ code: 'lump' })]]),
+      codes,
+    )
+    expect(repeated.get(2)!.qty).toBe(1)
+    expect(repeated.get(4)!.qty).toBe(0)
+    expect(computeTotals(repeated, []).direct).toBe(1000)
+  })
+
+  test('an element with no key is priced as unassigned and included, and never carries a lump sum', () => {
+    const facts = factsOf([fact(0, { key: null }), fact(1, { key: 'z' })])
+    const codes = new Map([
+      ['lump', code('lump', { basis: 'lump', price: 1000 })],
+      ['c', code('c', { price: 10 })],
+    ])
+    // Nothing is stored under 'null' or an index: an entry that spells one is not read.
+    const assignments = new Map([
+      ['null', assigned({ code: 'c', hidden: true })],
+      ['index-0', assigned({ code: 'c', hidden: true })],
+      ['id-1000', assigned({ code: 'c', hidden: true })],
+      ['z', assigned({ code: 'lump' })],
+    ])
+    const rows = priceRows(facts, assignments, codes)
+    expect(rows.get(0)).toMatchObject({ code: null, wp: null, hidden: false, amount: 0, missing: false })
+    expect(rows.get(1)!.qty).toBe(1)
+    const totals = computeTotals(rows, [])
+    expect(totals.direct).toBe(1000)
+    expect(totals.nall).toBe(2)
   })
 
   test('a code without a quantity is missing and costs only its extra', () => {
@@ -390,6 +447,26 @@ test.describe('grouping', () => {
     expect(none.wp).toBe('')
     expect(none.code).toBe('')
     expect(checkState(none)).toBe('checked')
+  })
+
+  test('groups count their members with no key, which the UI cannot write', () => {
+    const mixed = factsOf([
+      fact(0, { key: null, category: 'Walls' }),
+      fact(1, { category: 'Walls' }),
+      fact(2, { key: null, category: 'Doors' }),
+    ])
+    const root = buildTree({
+      facts: mixed,
+      priced: priceRows(mixed, new Map(), costCodes),
+      nesting: ['category'],
+      workPackages,
+      costCodes,
+    })
+    expect(root.unkeyed).toBe(2)
+    const byValue = new Map(groups(root).map((g) => [g.value, g]))
+    expect(byValue.get('Walls')).toMatchObject({ count: 2, unkeyed: 1 })
+    expect(byValue.get('Doors')).toMatchObject({ count: 1, unkeyed: 1 })
+    expect(groups(tree()).every((g) => g.unkeyed === 0)).toBe(true)
   })
 
   test('code groups sort by code text', () => {

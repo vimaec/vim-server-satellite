@@ -47,9 +47,17 @@ export function fixtureFacts(): Promise<Map<number, ElementFacts>> {
   return cached
 }
 
-/** The facts of one fixture element; throws when it is not in scope. */
-export async function fixtureElement(index: number): Promise<ElementFacts> {
+/** Facts of an element that has a data-store key (a Revit UniqueId). */
+export type KeyedFacts = ElementFacts & { key: string }
+
+/**
+ * The facts of one fixture element; throws when it is not in scope. Every
+ * Tiny House element has a UniqueId, so the key is typed as present: the tests
+ * read and seed the store by it. A fixture element without one throws.
+ */
+export async function fixtureElement(index: number): Promise<KeyedFacts> {
   const facts = (await fixtureFacts()).get(index)
   if (!facts) throw new Error(`Element ${index} is not in the fixture's scope.`)
-  return facts
+  if (facts.key === null) throw new Error(`Element ${index} has no UniqueId, so no data-store key.`)
+  return { ...facts, key: facts.key }
 }

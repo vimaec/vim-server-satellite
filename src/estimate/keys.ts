@@ -1,20 +1,18 @@
 /**
- * The data-store key for one element.
+ * The data-store key for one element: its Revit UniqueId, or null when it has
+ * none.
  *
- * The Revit UniqueId is stable across snapshots, so an assignment survives a
- * re-export; the row index is not, and the ElementId is only unique per
- * document. Data-store keys must not contain `/`, which none of these do.
+ * Only the UniqueId may key anything stored. The row index moves with every
+ * export, so an assignment keyed by it would land on another element after a
+ * re-export; the ElementId is only unique inside one Revit document, so in a
+ * merged VIM two documents' elements would share one key. An element with no
+ * UniqueId is still listed and priced (as unassigned and included), but
+ * nothing can be stored for it, so the UI disables its write controls and bulk
+ * writes skip it. Data-store keys must not contain `/`, which a UniqueId does
+ * not.
  *
  * `||` and not `??`: vim-web reports a missing UniqueId as an empty string.
- * ElementId `-1` means "no Revit id at all", so it cannot key anything — every
- * such element would share `id--1`. Those fall back to the row index, which is
- * snapshot-local: an assignment keyed that way does not survive a re-export.
  */
-export function elementKey(element: {
-  uniqueId?: string
-  elementId: string
-  index: number
-}): string {
-  if (element.uniqueId) return element.uniqueId
-  return element.elementId === '-1' ? `index-${element.index}` : `id-${element.elementId}`
+export function elementKey(element: { uniqueId?: string }): string | null {
+  return element.uniqueId || null
 }
