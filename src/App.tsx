@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from './auth/AuthProvider'
 import { basePath } from './config'
 import { setDebugState } from './debug'
+import { Label } from './ds'
 import { ProjectPage } from './pages/ProjectPage'
 import { ProjectPickerPage } from './pages/ProjectPickerPage'
 import { SignInPage } from './pages/SignInPage'
@@ -66,11 +67,13 @@ export function App(): JSX.Element {
   if (state === 'loading') {
     return (
       <main className="centered" data-testid="app-loading">
-        <p className="muted">Starting…</p>
+        <Label variant="dim">Starting…</Label>
       </main>
     )
   }
   if (state === 'sign-in') return <SignInPage />
-  if (state === 'project') return <ProjectPage projectId={projectId} onBack={closeProject} />
+  // Keyed by the project: a direct switch (Back / Forward) starts a fresh page, so no state of
+  // the previous project, such as its role, applies to the next one even for a moment.
+  if (state === 'project') return <ProjectPage key={projectId} projectId={projectId} onBack={closeProject} />
   return <ProjectPickerPage onOpen={openProject} />
 }

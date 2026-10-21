@@ -3,10 +3,14 @@
 A sample **"satellite" app** for [VIM Server](https://vimaec.com): a single-page app that signs the
 user in with the VIM Server Microsoft Entra ID app registration, lists the projects they can reach,
 loads a project's latest VIM snapshot in the [vim-web](https://www.npmjs.com/package/vim-web)
-viewer, lets them select elements in 3D or in an element tree, and applies coloured labels stored
-back on the project — in the project's own custom data store, so the app needs no database and no
-server code of its own. It exists to be copied: plain React 18 + TypeScript + Vite and plain CSS, no
-router, no state library and no UI kit, so each piece lifts out on its own.
+viewer, and keeps a cost **estimate** of the model's elements: cost codes, work packages,
+estimation sheets and markups, attached to the elements of the loaded VIM. The estimate is stored
+in the project's own custom data store on VIM Server, so the app needs no database and no server
+code of its own. It is a lean port of the VIM Flex "Estimate" workflow, styled with a copy of the
+vim-html-ds design system.
+
+The sample exists to be copied: plain React 18 + TypeScript + Vite and plain CSS, no router, no
+state library and no UI library dependency, so each piece lifts out on its own.
 
 Live build: <https://vimaec.github.io/vim-server-satellite/>
 
@@ -16,14 +20,77 @@ Live build: <https://vimaec.github.io/vim-server-satellite/>
 |---|---|
 | Entra ID authorization code + PKCE, written out with `fetch` (no MSAL, no CDN) | `src/auth/pkce.ts`, `src/auth/entra.ts` |
 | Session storage, silent refresh, and a clean drop back to sign-in on a 401 | `src/auth/AuthProvider.tsx`, `src/api/http.ts` |
-| Asking the server which Entra app registration to trust (`GET /api/v1/config`) | `src/config.ts` |
-| Bearer header, `ProblemDetails` to `ApiError`, one allow-listed status (404) | `src/api/http.ts` |
+| Asking the server which Entra app registration to trust (`GET /api/v1/config`) | `src/auth/AuthProvider.tsx`, `src/config.ts` |
+| Bearer header, `ProblemDetails` to `ApiError`, allow-listed statuses, retries of idempotent requests | `src/api/http.ts` |
+| Bounded concurrency for request fan-outs | `src/api/limit.ts` |
 | Typed wrappers for the REST endpoints, and the custom data store as app storage | `src/api/vimServer.ts`, `src/api/projectData.ts`, `src/api/types.ts` |
-| Listing every reachable project (there is no "all projects" endpoint) | `src/pages/ProjectPickerPage.tsx` |
-| Resolving a snapshot to a time-limited blob URL and loading it in the viewer | `src/pages/ProjectPage.tsx`, `src/viewer/` |
-| An element tree built from the VIM's own BIM tables, kept in sync with the 3D selection | `src/tree/`, `src/viewer/` |
-| Labels persisted per project, with ETag concurrency and role checks | `src/labels/` |
+| Listing every reachable project (there is no "all projects" endpoint) | `src/api/vimServer.ts`, `src/pages/ProjectPickerPage.tsx` |
+| Resolving a snapshot to a time-limited blob URL and loading it in the viewer | `src/pages/ProjectPage.tsx`, `src/viewer/ViewerPane.tsx` |
+| Per-element quantities read in bulk from the VIM's own BIM tables | `src/estimate/quantities.ts` |
+| Estimate data in the project data store: one namespace per kind, keyed by Revit UniqueId, ETag read–modify–write for shared documents, batched last-write-wins for elements | `src/estimate/store.ts`, `src/estimate/keys.ts` |
+| Optimistic writes through one serial queue, rolled back and re-read when the server refuses; a reload that waits for them and keeps edits made while it reads | `src/estimate/useEstimate.ts` |
+| Pricing, totals, the cost colour ramp and the palette by grouping level, as pure functions | `src/estimate/pricing.ts` |
+| A virtualized, grouped element tree that drives and follows the 3D selection | `src/estimate/grouping.ts`, `src/estimate/ui/ElementTree.tsx`, `src/estimate/ui/VirtualTree.tsx` |
+| Excluded elements hidden in 3D, data colours applied per element, a right-click menu over the viewer | `src/viewer/ViewerPane.tsx`, `src/estimate/ui/menus.ts` |
+| Read-only mode for every project role but `Manager` and `Admin` | `src/estimate/useEstimate.ts`, `src/estimate/ui/` |
+| The vim-html-ds design system as plain CSS plus React twins of its components | `src/ds/` |
 | End-to-end tests against a full in-browser mock of VIM Server, then a Pages deploy | `tests/support/mockVimServer.ts`, `.github/workflows/pages.yml` |
+
+## Prerequisites
+
+- **Node 22 or later**, and npm (CI uses Node 22). There is no API key to request and no server-side
+  component to deploy.
+- An account on a VIM Server instance, the default being <https://server-dev.vimaec.com>, with
+  membership of at least one organisation there — otherwise the project list is empty. Microsoft
+  Entra ID is the only way to sign in.
+
+### Entra app registration
+
+The app signs in through the VIM Server app registration: client
+`f518716e-50bb-4c82-bbee-3c85da317f82`, tenant `4e856586-7c87-4498-956e-ab21660251e1`. Two things
+must be true of it, and both already are:
+
+- The redirect URIs `http://localhost:5173/signin-oidc` and
+  `https://vimaec.github.io/vim-server-satellite/signin-oidc` are registered under the
+  **Single-page application** platform. The SPA platform matters: it is what permits PKCE with no
+  client secret and returns the CORS headers the token request needs.
+- The delegated scope `api://f518716e-50bb-4c82-bbee-3c85da317f82/Sync.ReadWrite` is exposed under
+  **Expose an API**. That is the scope the app asks for and the audience VIM Server validates.
+
+Serving the app from any **other** origin or path — a fork, a different dev port, your own host —
+needs that origin's `.../signin-oidc` URI added to the registration first. Entra refuses an
+unregistered redirect URI outright, with `AADSTS50011`. See [Deploy](#deploy).
+
+## Run locally
+
+```bash
+npm install
+npm run dev            # http://localhost:5173
+```
+
+Open <http://localhost:5173> and choose **Sign in with Microsoft**. The dev port is fixed
+(`strictPort: true` in `vite.config.ts`) because the registered redirect URI names port 5173; if the
+port moves, sign-in stops working.
+
+No configuration is needed: every value has a working default (`src/config.ts`). To point the app
+somewhere else, copy `.env.example` to `.env.local`:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VITE_VIM_SERVER_URL` | `https://server-dev.vimaec.com` | VIM Server base URL, no trailing slash |
+| `VITE_ENTRA_TENANT_ID` | `4e856586-7c87-4498-956e-ab21660251e1` | Fallback tenant, used only when `GET /api/v1/config` fails or answers something unusable |
+| `VITE_ENTRA_CLIENT_ID` | `f518716e-50bb-4c82-bbee-3c85da317f82` | Fallback client id, same |
+| `VITE_ENTRA_API_SCOPE` | `api://<clientId>/Sync.ReadWrite` | The delegated scope to request |
+
+Vite inlines `import.meta.env.*` at build time, so a change needs a restart of `npm run dev`, or a
+rebuild. `BASE_PATH` is a build-time **environment** variable rather than a `VITE_` one, and it sets
+Vite's `base` (default `/`).
+
+```bash
+npm run build                                     # tsc --noEmit && vite build -> dist/
+BASE_PATH=/vim-server-satellite/ npm run build    # what CI deploys
+npm run preview                                   # serves dist/
+```
 
 ## How it works
 
@@ -51,10 +118,11 @@ the app is served, so one build works from the dev server and from GitHub Pages:
 `http://localhost:5173/signin-oidc` and `https://vimaec.github.io/vim-server-satellite/signin-oidc`.
 Both are registered (see [Prerequisites](#prerequisites)).
 
-The tenant and client id are not hard-wired at build time. On startup the app calls the anonymous
-route `GET {server}/api/v1/config` and uses the ids the server itself signs in with; the
-`VITE_ENTRA_*` values are only the offline fallback. A satellite app then follows the server it is
-pointed at, instead of needing a rebuild when the server changes tenant.
+The tenant and client id are not hard-wired at build time. On startup `AuthProvider` calls the
+anonymous route `GET {server}/api/v1/config` and uses the ids the server itself signs in with
+(`entraConfigFrom()` in `src/config.ts`); the `VITE_ENTRA_*` values are only the fallback when that
+call fails or returns ids with characters outside `[A-Za-z0-9.-]`. A satellite app then follows the
+server it is pointed at, instead of needing a rebuild when the server changes tenant.
 
 **Sign in.** `beginSignIn()` generates a 32-byte PKCE verifier and a 16-byte `state`, stores both in
 `sessionStorage`, and redirects to `{authority}/authorize` with `response_mode=fragment`,
@@ -62,7 +130,7 @@ pointed at, instead of needing a rebuild when the server changes tenant.
 
 **Come back.** Entra returns to the redirect URI with `#code=...&state=...`, or with
 `#error=...&error_description=...`. On GitHub Pages the extensionless path `/signin-oidc` is served
-by `public/signin-oidc.html`, whose whole job is one line, `location.replace("./" + location.hash)`,
+by `public/signin-oidc.html`, whose whole job is one line, `location.replace('./' + location.hash)`,
 because the PKCE verifier lives in the app's own tab-scoped storage and not on the redirect page.
 The Vite dev server does **not** serve files from `public/` for an extensionless path; its SPA
 fallback answers `/signin-oidc` with `index.html`. So the app also finishes a sign-in that arrives
@@ -108,6 +176,7 @@ bearer token is always required.
 | PUT | `/project/{id}/data/{ns}/{key}` | Write one entry; optional `If-Match` or `If-None-Match: *`, either of which gives `412` when it does not hold | `putEntry()` |
 | PUT | `/project/{id}/data/{ns}` | Batch upsert of `[{ key, value }]`, returns `{ created, updated }` | `putEntries()` |
 | POST | `/project/{id}/data/{ns}/delete` | Batch delete of `["key", ...]`, returns `{ deleted }` | `deleteEntries()` |
+| DELETE | `/project/{id}/data/{ns}` | Delete a whole namespace; the app treats `404` as done | `deleteNamespace()` |
 
 Things worth knowing before you write your own client:
 
@@ -116,9 +185,13 @@ Things worth knowing before you write your own client:
   failing the whole page.
 - A project you cannot see answers `404`, never `403`. A `403` is either the licence gate — whose
   body is `{ error, message }` rather than RFC 7807 `ProblemDetails`, and `http.ts` handles both
-  shapes — or a write attempted with only the `Viewer` role, such as a label write to the data store.
-- Data store reads need the `Viewer` project role and writes need `Manager`. Keys may not contain a
-  slash.
+  shapes — or a write attempted with only the `Viewer` role, such as an estimate write to the data
+  store.
+- Data store reads need the `Viewer` project role and writes need `Manager` or `Admin`. Keys may not
+  contain a slash; `path()` in `http.ts` escapes every other character.
+- Under load the server sometimes answers with a 5xx, or with a `302` to the Entra sign-in page that
+  the browser reports as a CORS error. See **Busy server** under
+  [Estimate data in the store](#estimate-data-in-the-store) for how the app copes.
 
 ### Loading the VIM
 
@@ -143,6 +216,89 @@ resolved when the project page opens rather than cached. Omit `blobId` for the l
 pass one from `getVimHistory().history` to open an older one. A project whose `latestVim` is `null`
 has no snapshot; the picker disables it and says so.
 
+### The 3D view
+
+`src/viewer/ViewerPane.tsx` owns the one vim-web viewer, created once per project page. The app
+draws its own tree and estimate panel, so vim-web's BIM tree, BIM info and project inspector panels
+are off (`ui.panelBimTree`, `ui.panelBimInfo`, `ui.miscProjectInspector`). The axis widget is off
+too (`ui.panelAxes: false`): the top-right corner holds the Cost Details button, and the control
+bar still frames the scene and the selection. Auto-isolate is off, and a right-click (not a
+right-drag, which turns the camera) opens the app's own element menu instead of vim-web's.
+
+The background is the DS stage colour `#0b121c` (`--stage-900`), and that is the pixel value on
+screen (`VIEWER_BACKGROUND`). It goes to vim-web as the core setting `background.color`, the third
+argument of `React.Webgl.createViewer()`, and the pane under the canvas is painted with it too, so
+the colour is there before the viewer exists and before a model loads. vim-web writes that colour
+to the screen without a linear-to-sRGB step, so the `THREE.Color` is built with the hex values as
+they are (`rendererColor()`, `LinearSRGBColorSpace`); `new THREE.Color('#0b121c')` would be drawn
+almost black. Nothing in vim-web sets the background again, and the viewer is created with
+`canReadLocalStorage: false`, so no setting saved by its settings panel applies either.
+
+Ghosted elements are a pale veil of the DS light grey `#d6dce6` (`--text-200`) at opacity 0.01
+(`GHOST_COLOR` and `GHOST_OPACITY`), not vim-web's near-black default, which vanishes on the dark
+background. They go to vim-web as the core setting `materials.ghost`, and the colour is built the
+same way as the background, because vim-web's ghost shader also writes it with no sRGB step. A ghost
+is an element vim-web draws as hidden while its "Show Ghost" setting is on (the default): the
+estimate's excluded elements (it hides them with `element.visible = false`), and what the control
+bar's Isolate Selection and Hide Selection leave out. vim-web's isolation settings panel can change
+the opacity for the session; with `canReadLocalStorage: false` the change is not kept.
+
+The Display colours go to vim-web per element (`element.color`), built the same way again
+(`rendererColor()`): vim-web keeps an override's channels in its colour palette texture and its
+model shader writes them times the face's shading, with no sRGB step. So a face in full light shows
+the hex that the tree swatch and the cost legend show; `new THREE.Color(hex)` would convert it to
+linear first and draw it darker and more saturated (`#b03b53` came out as `#630a14` on a lit wall).
+
+vim-web's control bar and the panels it opens are restyled in the DS theme by the "vim-web control
+bar" section of `src/styles.css`, scoped to `.viewer-pane`: flat `--stage` groups with a 1px
+hairline and no shadow, and buttons that follow the DS icon button (its size, the `--text` greys,
+a cyan keyline and tint for a mode that is on, 40 % opacity when not available). At the
+operator's request the shapes are round, which the DS keeps for dots only: each group is a
+capsule and each button a circle, with the same 4 px (`--ds-space-1`) padding on all sides so
+that the end buttons are concentric with the capsule ends. The bar's tooltips take the DS tooltip
+look. The Settings, Render Settings and Section Box panels keep vim-web's markup; their vim-web
+palette variables are pointed at DS tokens. vim-web's own CSS in `node_modules` is not changed.
+
+### The estimate
+
+What a user does in the panel left of the viewer (`src/estimate/ui/`):
+
+- **Elements tab.** The model's elements in a tree grouped by work package › cost code › category ›
+  family and type. The grouping is configurable (work package, cost code, category, family, type,
+  family and type, level, system, BIM document). Each row shows count, amount and quantity, and
+  takes a work package, a cost code, an extra amount and a note; on a group row the choice applies
+  to every member. The include box excludes an element from the sheet and hides it in 3D. A search
+  (on Enter), a Show filter (All, Included, Excluded), and Display: no colours, colours by cost with
+  a legend, or colours by one grouping level with a shuffle.
+- **Cost Codes tab.** The cost codes grouped by discipline and group, with basis, unit, unit price,
+  labor and adders edited in place, Add code, an Edit… dialog and Delete, a search and an All /
+  In use filter. A click on a code selects its elements in 3D.
+- **Sheets.** New, Duplicate, Rename and Delete in the sheet select; a currency and a list of markups
+  per sheet. The footer shows the markups, the TOTAL, the direct cost, how many elements have a cost
+  code, and how many have a code but no quantity for it.
+- **Selection.** A row click selects in 3D (Ctrl / Cmd toggles, Shift selects a range); a pick in 3D
+  marks the rows. The right-click menu on a row or in the 3D view has Set Cost Code…, Copy / Paste
+  Cost Code, Set Work Package…, Include, Exclude, and Clear work package and cost code; on a work
+  package group row it also has Rename… and Delete work package. Outside text fields, Ctrl+C copies
+  the cost code of the one selected element, Ctrl+V pastes it on the selection, and Ctrl+X switches
+  the selection between included and excluded.
+- **Cost Details.** A pane right of the viewer: a summary of the selection, and a navigator that
+  steps through the selected elements one at a time without changing the selection. The camera can
+  follow the element shown.
+- **EN / 日本語.** The language switch in the panel head. It also translates the project page's top
+  bar and the viewer's status line; the sign-in and project picker pages stay in English.
+- **Reload.** The button next to the Estimate title (tip "Reload from VIM Server", test id
+  `estimate-refresh`) reads the work packages, cost codes, sheets (names, currency, markups) and the
+  active sheet's assignments again from VIM Server, to show what other people changed. Viewers can
+  use it too: it only reads. While it runs the button is disabled and the head says "Reloading…"; a
+  read that fails shows a toast and leaves the screen as it was. See **Concurrency** below for how
+  it treats edits that are not stored yet.
+
+Per-user view settings stay in this browser's `localStorage`, under `vimSatellite.estimate.*`: the
+language, the active sheet per project, the grouping, the Display mode and its shuffle seed, and the
+Show filter (`src/estimate/prefs.ts`). They are one person's way of looking at the estimate, so they
+never go to the shared store. A value that cannot be read falls back to its default.
+
 ### Element identity
 
 Three different ids show up around one element, and choosing the wrong one silently breaks
@@ -150,118 +306,199 @@ persistence:
 
 | In the viewer | In the VIM | Stable across snapshots? | Used here for |
 |---|---|---|---|
-| `element` (`number`) | `Vim.Element._key` | **No** — it is a row index | selection, colour overrides, tree keys: all in memory |
-| `elementUniqueId` (`string`) | Revit `Element.UniqueId` | **Yes** | the label key stored on the server |
-| `elementId` (`bigint`) | Revit `ElementId` | per document (`-1` means none) | the `[id]` shown in the tree |
+| `element` (`number`) | `Vim.Element._key` | **No** — it is a row index | selection, colour overrides, hiding, tree rows: all in memory |
+| `elementUniqueId` (`string`) | Revit `Element.UniqueId` | **Yes** | the assignment key stored on the server |
+| `elementId` (`bigint`) | Revit `ElementId` | per document (`-1` means none) | shown in the tree and in Cost Details, and stored in each assignment for a person who reads the store |
 
 An element index is only meaningful for the model instance currently loaded — re-export the project
-and the indices move. So labels are keyed by **UniqueId**:
+and the indices move. The ElementId is no better as a key: it is unique only inside one Revit
+document, so in a merged VIM two documents can share one. So an assignment is keyed by the **Revit
+UniqueId** and nothing else (`src/estimate/keys.ts`):
 
 ```ts
-elementKey(e) = e.uniqueId || (e.elementId !== '-1' ? `id-${e.elementId}` : `index-${e.index}`)
+elementKey(e) = e.uniqueId || null
 ```
 
-`||`, not `??`: vim-web reports a missing UniqueId as an empty string. The `id-` fallback covers
-source formats that have no UniqueId, and reads as the weaker thing it is. ElementId `-1` means "no
-Revit id at all", so it cannot key anything — every such element would share one key, `id--1` — and
-those fall back to the row index, which is **snapshot-local**: a label keyed that way does not
-survive a re-export. On load the app fetches the assignments, maps each key back to the element index
-of the loaded model, and applies the colours.
+`||`, not `??`: vim-web reports a missing UniqueId as an empty string. An element with no UniqueId is
+still listed, counted and priced, as unassigned and included, but nothing can be stored for it: its
+include box, work package, cost code, extra and note are disabled with a tip that says why, the
+menu's write verbs are off when it is the only target, and bulk actions on a selection or a group
+skip it (their toast counts only the elements written). The element index is used only at runtime,
+to address elements in vim-web within the loaded snapshot; nothing stored or kept across sessions
+depends on it. On load the app reads the active sheet's assignments and finds each element's entry
+by its UniqueId.
 
-### Labels data layout
+### Estimate data in the store
 
-Two namespaces in the project's custom data store. Nothing is stored anywhere else.
+Four kinds of namespace in the project's custom data store (`src/estimate/store.ts`). Nothing is
+stored anywhere else. Ids are short random strings that the client makes, with a type prefix
+(`code-1a2b3c4d`), never "max + 1": several people may add a cost code at the same moment.
 
-| Namespace | Key | Value | Written by |
-|---|---|---|---|
-| `satellite.palette` | `palette` | `{ labels: [{ id, name, color: "#rrggbb" }] }` | palette edits: read–modify–write, `If-Match` (or `If-None-Match: *` to create) |
-| `satellite.labels` | element key: UniqueId, else `id-<elementId>`, else `index-<row>` | `{ labelId, elementId, elementName?, by?, at }` | applying a label (batch `PUT`), removing one (batch delete) |
-
-The default palette — Review `#e5484d`, Approved `#30a46c`, Question `#f5a524` — is created
-client-side when a project has none, and is written to the server only on the first label write, so
-browsing a project never changes it.
-
-An assignment stores the label **id**, not its colour. Renaming a label or changing its colour is
-then one palette write, and every element carrying that label follows. `by` and `at` record who
-labelled what, and when.
-
-**Concurrency.** The palette is one JSON document that everyone on the project shares, so every
-palette change is a read–modify–write rather than a `PUT` of the copy this browser happens to hold
-(`updatePalette()` in `src/labels/labelsApi.ts`). One attempt is: read the entry with its `ETag` — a
-quoted integer write-version, for example `"3"` — apply the change to what is *stored*, and write it
-back with `If-Match`. When the project has no palette yet, that first write instead carries
-`If-None-Match: *`, which makes it create-only. Either precondition answers `412` when it no longer
-holds, which means somebody else wrote first: the cycle simply runs again over their version, up to
-three times. So two people adding a label at the same time end up with both labels, and the app
-adopts the merged result the server returns rather than its own copy.
-
-Nothing may be written before that first read has finished. Until then the app does not know whether
-the project already has a palette, and a create-only guess would either fail or, without the
-precondition, overwrite someone else's labels; so the whole panel stays disabled while it loads and
-offers **Retry** if the read failed.
-
-Per-element assignments are last-write-wins on purpose: they are independent keys, and one user
-labelling a wall does not conflict with another labelling a door. Deleting a label removes its
-assignments **first** and updates the palette after, because a label with no assignments is
-harmless, while an assignment pointing at a label that no longer exists colours nothing.
-
-**Roles.** The label panel needs `Manager` or `Admin` on the project; with `Viewer` it is read-only
-and says so, because a write would come back `403`. The role comes from `GET /project/{id}/role`,
-and if that call fails the app assumes the lowest privilege rather than failing the page.
-
-## Prerequisites
-
-- **Node 22 or later**, and npm (CI uses Node 22). There is no API key to request and no server-side
-  component to deploy.
-- An account on a VIM Server instance, the default being <https://server-dev.vimaec.com>, with
-  membership of at least one organisation there — otherwise the project list is empty.
-
-### Entra app registration
-
-The app signs in through the VIM Server app registration: client
-`f518716e-50bb-4c82-bbee-3c85da317f82`, tenant `4e856586-7c87-4498-956e-ab21660251e1`. Two things
-must be true of it, and both already are:
-
-- The redirect URIs `http://localhost:5173/signin-oidc` and
-  `https://vimaec.github.io/vim-server-satellite/signin-oidc` are registered under the
-  **Single-page application** platform. The SPA platform matters: it is what permits PKCE with no
-  client secret and returns the CORS headers the token request needs.
-- The delegated scope `api://f518716e-50bb-4c82-bbee-3c85da317f82/Sync.ReadWrite` is exposed under
-  **Expose an API**. That is the scope the app asks for and the audience VIM Server validates.
-
-Serving the app from any **other** origin or path — a fork, a different dev port, your own host —
-needs that origin's `.../signin-oidc` URI added to the registration first. Entra refuses an
-unregistered redirect URI outright, with `AADSTS50011`. See [Deploy](#deploy).
-
-## Run locally
-
-```bash
-npm install
-npm run dev            # http://localhost:5173
-```
-
-Open <http://localhost:5173> and choose **Sign in with Microsoft**. The dev port is fixed
-(`strictPort: true`) because the registered redirect URI names port 5173; if the port moves, sign-in
-stops working.
-
-No configuration is needed: every value has a working default. To point the app somewhere else, copy
-`.env.example` to `.env.local`:
-
-| Variable | Default | Purpose |
+| Namespace | Key | Value |
 |---|---|---|
-| `VITE_VIM_SERVER_URL` | `https://server-dev.vimaec.com` | VIM Server base URL, no trailing slash |
-| `VITE_ENTRA_TENANT_ID` | `4e856586-7c87-4498-956e-ab21660251e1` | Fallback tenant, used only when `GET /api/v1/config` fails |
-| `VITE_ENTRA_CLIENT_ID` | `f518716e-50bb-4c82-bbee-3c85da317f82` | Fallback client id, same |
-| `VITE_ENTRA_API_SCOPE` | `api://<clientId>/Sync.ReadWrite` | The delegated scope to request |
+| `estimate.workPackages` | work package id | `{ en, ja, sort }` |
+| `estimate.costCodes` | cost code id | `{ code, name, descr, discipline, grp, unit, basis, price, laborDays, laborRate, matAdd, labAdd }` |
+| `estimate.sheets` | sheet id | `{ name, sort, currency, markups: [{ id, name, pct }] }` |
+| `estimate.sheet.<sheetId>` | Revit UniqueId (elements without one are not stored) | `{ wp?, code?, extra?, note?, hidden?, elementId, by?, at }` |
 
-Vite inlines `import.meta.env.*` at build time, so a change needs a restart of `npm run dev`, or a
-rebuild. `BASE_PATH` is a build-time **environment** variable rather than a `VITE_` one, and it sets
-Vite's `base`.
+`basis` is `count`, `length`, `area`, `volume` or `lump`. `matAdd` and `labAdd` are fractions
+(`0.1` is 10 %); the UI shows them as percent. A markup `pct` is a percent. `currency` is an ISO code
+and only sets the symbol shown with amounts: nothing is converted. Work packages and cost codes are
+shared by every sheet. An assignment refers to them by id, so a renamed code or a new unit price
+applies to every element that carries it. `by` and `at` record who wrote an assignment, and when.
+Every read normalizes the stored JSON field by field, so a hand-edited entry cannot break the page.
 
-```bash
-npm run build                                     # tsc --noEmit && vite build -> dist/
-BASE_PATH=/vim-server-satellite/ npm run build    # what CI deploys; npm run preview serves dist/
+An assignment that says nothing — no work package, cost code, extra or note, and not excluded — is
+**deleted**, not stored, so "no entry" means exactly "nothing". To include an element again
+therefore deletes its entry, unless the entry holds something else.
+
+**Browsing never writes.** A project with no stored sheet shows a virtual sheet "Estimate 1" (USD,
+three markups at 0 %: Miscellaneous, Risk, Safety margin) with the fixed id `sheet-1`. The first
+write that needs it creates it with `If-None-Match: *` (create-only). The id is fixed, not random,
+so that two people who start to estimate an empty project at the same time create the same sheet:
+the second create gets `412`, and the app takes that as "it exists" and writes into it.
+
+**Concurrency.**
+
+- A **sheet document** is shared and edited as a whole (its markup list), so every change to it is a
+  read–modify–write (`updateSheet()`): read the entry with its `ETag` — a quoted integer
+  write-version, for example `"3"` — apply the change to what is *stored*, and write it back with
+  `If-Match`. A `412` means somebody else wrote first: the cycle runs again over their version, up
+  to three attempts in all, and the app then shows the sheet as stored, other people's changes
+  included. The change itself is one operation, never "this page's copy of the list": rename, set
+  the currency, add a markup, change one markup (by id), delete one markup (by id). So one user who
+  changes Risk while another adds an Insurance markup or renames the sheet undoes neither.
+- **Cost codes, work packages and assignments** are one entry per thing and last-write-wins: one user
+  who prices a wall does not conflict with another who prices a door. Assignment changes made within
+  40 ms of each other (`BATCH_DELAY_MS`) go out as one batch (`PUT /data/{ns}` for upserts,
+  `POST /data/{ns}/delete` for deletes, at most 1,000 keys per request), so an action on 5,000
+  elements is a handful of requests.
+- **Busy server.** Under load, VIM Server sometimes answers an API call with a 5xx, or with a `302` to
+  the Entra sign-in page. That redirect has no CORS headers, so the browser reports a CORS error and
+  `fetch` fails with no status. The app keeps the load low and recovers: a bulk change is split into
+  batches of 1,000 entries, and at most `WRITE_CONCURRENCY` (2) batch requests are in flight at once
+  (`mapLimit()` in `src/api/limit.ts`). Requests that are safe to send again opt in with
+  `retry: true` (data-store reads, batch upserts, batch deletes, namespace deletes, and a PUT without
+  a precondition); `src/api/http.ts` retries them up to three times, after 0.5 s, 1 s and 2 s
+  (`RETRY_DELAYS_MS`) plus up to 50 % random jitter, when there is no answer or the status is 429,
+  500, 502, 503 or 504. A `401` is never retried: it still ends the session. The conditional sheet
+  write (`If-Match`) is never sent again blindly: after a failure the sheet is read again, and
+  written again only when its `ETag` shows the first write did not land. When the retries are used
+  up, the change is taken back and the toast says "VIM Server did not answer".
+- All writes go through **one serial queue**, in the order the user made them: a new cost code
+  reaches the server before the assignments that use it, a new sheet before its assignments.
+- Writes are **optimistic**: the screen changes first. When the server refuses a write, the change is
+  taken back, a toast says why, and the whole estimate is read again from the server. That read is
+  only taken in when no edit was made while it was out; otherwise it runs again after that edit's
+  write, so an older read never takes a newer edit off the screen (the next edit of that element
+  would then write the stale entry back). There is no polling: the data is read when the project
+  opens, after a failed write, on Retry, and on **Reload** (`reload()` in the hook).
+- **Reload** sends the assignment batch that is waiting, waits until the write queue is empty, and
+  only then reads, so the read sees this page's own edits. It is the same re-read as after a
+  failure: an edit made while the read is out makes the read run again after that edit's write,
+  never take it off the screen. It keeps the active sheet; when that sheet was deleted elsewhere,
+  it opens the first sheet, and the active sheet and its assignments change in one step, as for a
+  switch.
+- **Switching sheets.** The hook holds the active sheet's id and its assignments as one value, and
+  takes assignment writes only while that value has the assignments of that sheet. A switch drops
+  the previous sheet's assignments at once and reads the new sheet's: until they arrive the tree
+  says the sheet is loading and every input is disabled, and if the read fails the panel says so
+  with a Retry (the sheet select still works, to go back). An edit can never land in a sheet other
+  than the one it was made on.
+
+**Delete order.** A sheet: its `estimate.sheet.<id>` namespace first (`DELETE /data/{ns}`), then
+its entry in `estimate.sheets`, so a sheet never points at data that is gone. The last sheet cannot
+be deleted. A cost code or a work package: the app first clears it from the assignments of **every**
+sheet — it reads the sheet list again, so a sheet that someone else added is cleaned too — and only
+then deletes its entry. Duplicate creates the new sheet entry (create-only) with the source's
+markups and currency, then copies the assignments with a batch upsert.
+
+**Roles.** Writes need `Manager` or `Admin` on the project (`canWriteRole()`, an allow-list: a role
+the app does not know reads only). With any other role the panel says it is read-only and names
+the role, every input is disabled, and the menus show the write verbs disabled, because a write
+would come back `403`. The role comes from `GET /project/{id}/role`, and if that call fails the app
+assumes the lowest privilege rather than failing the page. Until the estimate and the role are both
+known, nothing is written. The project page is keyed by the project id, so a role never carries
+over from one project to the next.
+
+### Quantities from the BIM tables
+
+The estimate covers the elements that have geometry (`hasGeometry` in vim-web), less the saved 3D
+views (category `Cameras`). Their facts come from the VIM's BIM tables (`vim.bim`) through the column
+getters (`getAll…`): one call per column for the whole model, never one request per element
+(`src/estimate/quantities.ts`). The viewer loads the snapshot with `prewarmBim: true`, which caches
+those columns in the background.
+
+- **Length, Area, Volume** are the Revit parameters `Length` / `長さ`, `Area` / `面積` and `Volume` /
+  `体積`, from the `parameter` and `parameterDescriptor` tables. A stored value is
+  `<raw>|<display>`; the raw part is in ft, ft² or ft³ and is converted to m, m², m³ (× 0.3048,
+  × 0.09290304, × 0.028316846592). Several values on one element: the largest wins. A zero counts as
+  no value.
+- When an element has no `Area` or `Volume` parameter, the area and volume of its materials from
+  `materialInElement` are summed instead, paint excluded.
+- **System** is `System Name` / `システム名`. **Category, family, family type, level and BIM
+  document** come from the `element`, `category`, `familyInstance`, `familyType`, `level` and
+  `bimDocument` tables.
+
+Every BIM table is optional in a VIM file; a missing one leaves its facts empty instead of failing.
+
+### Pricing
+
+From `src/estimate/pricing.ts`, for each element in the active sheet:
+
 ```
+qty      = 1 (basis count), or the element's length, area or volume (basis length / area / volume)
+material = qty × unit price × (1 + material adders)
+labor    = qty × labor days per unit × labor rate × (1 + labor adders)
+amount   = material + labor + extra
+direct   = Σ amount over all elements (excluded elements still count)
+total    = direct × (1 + Σ markup % / 100)
+```
+
+A `lump` code charges its unit price once, on the element with the lowest key (UniqueId, ordinal
+compare) that carries it, so the same element carries it in every export; between elements that
+share a key, the lower row index decides. An element whose code needs a quantity that the element
+does not have is **missing**: it costs only its extra, and the footer counts it. A code or work
+package id that no longer exists counts as none.
+
+Display "Costs" colours each coded element by its rank among the coded elements (stops at 0, 0.25,
+0.5, 0.9 and 1: green over the lowest quarter, amber at the median, orange at the 90th percentile,
+red at the top), rounded to 33 colour steps, and leaves uncoded elements white. Ties share the lower
+rank.
+
+The Display colours are DS colours made lighter for the 3D view, where a colour covers whole faces
+and the shading darkens every face that does not face the light. The lift is done in OKLCH, where
+equal steps look equal: `liftColor()` adds 0.07 to the lightness and multiplies the chroma by 1.15
+as far as sRGB allows, and keeps the hue. The cost ramp (`costRamp()`) is `--health-green`,
+`--health-amber`, `--en-cost-warm` and `--en-cost-hot` lifted this way. "Colors by <level>" takes
+`categoricalPalette()`: the mean lightness and chroma of `--chart-1` to `--chart-4`, lifted the same
+way and alternating ± 0.04 in lightness so that neighbours differ in lightness too, on hues that
+walk the golden angle (137.508°) from `--chart-1`'s hue and skip 165°–225°, the cyan of vim-web's
+selection outline. The shuffle button changes the seed, which starts the walk at another hue and
+shuffles the order; a seed always gives the same colours. A group with no value stays white. The
+tree's swatches and the cost legend draw these same values; the DS tokens themselves are not
+changed.
+
+### Design system
+
+`src/ds/` is a copy of the [vim-html-ds](https://github.com/vimaec/vim-html-ds) design system:
+`ds.css` and `fonts/*` (Roboto for titles, body text and numbers, and FluentUI System Icons under
+MIT), plus React components that render the same DOM, classes and ARIA as the DS factories, so
+`ds.css` styles them with no extra CSS. The app uses the DS dark theme throughout, and
+`src/styles.css` holds layout only. `main.tsx` imports `ds.css` once, before `styles.css`, and
+mounts `<DsHost />` once for the DS dialogs, toasts and tooltips. The fonts are relative `url()`s
+that Vite bundles with the build's base path, so they also load under the GitHub Pages sub-path.
+`src/ds/README.md` records the vim-html-ds commit the copy came from.
+
+The copy has one deviation from upstream: vim-html-ds still uses a commercially licensed display font
+for titles, and this copy uses only open fonts. That font's `@font-face` rules and files are not
+copied, and `--font-display` is Roboto, so titles show in Roboto bold. The copy keeps this deviation
+until vim-html-ds uses an open title font too.
+
+To refresh it: copy `styles/ds.css` and `styles/fonts/*` from vim-html-ds again, reapply the
+Roboto-titles deviation as `src/ds/README.md` describes, update the commit hash there, and compare the DS
+factories that the React components mirror (`git diff <old>..<new> -- src/` in vim-html-ds) for
+changed markup or class names.
 
 ## Tests
 
@@ -277,7 +514,7 @@ npm run test:ui                   # interactive runner
 The main suite runs against `npm run dev`, which always serves the app from `/`. Serving it from a
 sub-path is what GitHub Pages does, and it can break on its own — asset URLs, `public/` files, the
 Entra redirect page — so that case has its own tiny suite over a real `BASE_PATH` build served by
-`vite preview`:
+`vite preview` (`playwright.subpath.config.ts`):
 
 ```bash
 BASE_PATH=/vim-server-satellite/ npm run build
@@ -287,17 +524,33 @@ BASE_PATH=/vim-server-satellite/ npm run test:subpath   # tests/subpath, port 41
 `playwright.config.ts` starts `npm run dev` itself, and reuses one already running locally. It pins
 Chromium to SwiftShader so headless WebGL works (`--use-gl=angle --use-angle=swiftshader
 --enable-unsafe-swiftshader --ignore-gpu-blocklist`) and runs one worker, because several software
-WebGL contexts at once are not reliable.
+WebGL contexts at once are not reliable. On CI it retries a failed test once and writes an HTML
+report.
 
-What the mock (`tests/support/mockVimServer.ts`) provides:
+What the mock (`tests/support/mockVimServer.ts`, `installMockVimServer(page, options)`) provides:
 
 - Interception of every request to `{server}/api/v1/**`, with two orgs and three projects — one of
-  them deliberately without a VIM — plus project roles, snapshot lists and download URLs.
-- The bearer check: `Authorization: Bearer e2e-token`, or `401`. `GET /config` is the one anonymous
-  route, as on the real server, and `setUnauthorized(true)` flips every authenticated route to
-  `401`, which is how the session-expiry path is tested.
-- A working data store with `ETag` write-versions, `If-Match` giving `412`, batch upsert and batch
-  delete, plus a record of every write, so a test can assert what was actually sent.
+  them deliberately without a VIM — plus project roles, snapshot lists and download URLs. `orgs`
+  replaces them.
+- The bearer check: `Authorization: Bearer e2e-token` (or the `tokens` option), or `401`.
+  `GET /config` is the one anonymous route, as on the real server. `unauthorized`, or
+  `setUnauthorized(true)` on the handle, flips every authenticated route to `401`, which is how the
+  session-expiry path is tested.
+- A working data store with `ETag` write-versions, `If-Match` and `If-None-Match: *` giving `412`,
+  batch upsert, batch delete and namespace delete. The options:
+  - `data` seeds the store (namespace → key → value).
+  - `beforeEntryWrite` lets a test act as another writer between the app's read and its write.
+  - `failWrite` and `failRead` answer chosen writes or reads with an error status (for example
+    `500`) or with `'network'` (no answer, as the server's sign-in redirect looks in a browser), to
+    test retries and rollbacks.
+  - `holdWrite` holds a write until the test lets it go, so that requests overlap; `holdRead` holds
+    a read's reply (with the data of when it was asked for), so a read can arrive late and out of
+    date.
+
+  The returned handle records every write (`writes`) and every call (`calls`), reads one entry
+  (`entry()`), and counts the data-store requests in flight per namespace and in total (`inFlight`,
+  with `peak` since `resetPeaks()`), so a test can assert what was actually sent and how many
+  requests were out at once.
 - A **Range-capable blob route** on the fake origin `https://mock-blob.local`, serving
   `tests/fixtures/Tiny_House_Imperial.r2026.vim` (252 KB) with exact `206` / `Content-Range` /
   `Content-Length` / `Accept-Ranges` replies, and the CORS headers blob storage exposes. The vim-web
@@ -309,27 +562,54 @@ What the mock (`tests/support/mockVimServer.ts`) provides:
 writes a **fake session** object into `localStorage` under the key `vimSatellite.auth` through
 `addInitScript`, before any app code runs, with `access: "e2e-token"` — the token the mock accepts.
 The real PKCE path is covered separately by `seedPkce()` and `mockEntraToken()`, which seed the
-in-flight verifier and answer Entra's token endpoint.
+in-flight verifier and answer Entra's token endpoint. `tests/support/fixture.ts` reads the fixture
+in Node with vim-format, so a test knows each element's key and quantities without asking the app.
 
 `window.__vimSatellite` is a small read-only debug hook, always installed (`src/debug.ts`). It lets
 a test ask the app what it thinks instead of scraping CSS:
 
 ```ts
 window.__vimSatellite = {
-  getState():             string                     // 'loading' | 'sign-in' | 'picker' | 'project'
-  getSelection():         number[]                   // selected element indices
-  getElementColor(index): string | undefined         // the applied colour override, '#rrggbb'
-  getAssignments():       Record<string, Assignment> // element key -> assignment
+  getState():             string                // 'loading' | 'sign-in' | 'picker' | 'project'
+  getSelection():         number[]              // selected element indices
+  getElementColor(index): string | undefined    // the applied colour override, '#rrggbb'
+  getEstimate():          DebugEstimate | null  // { sheetId, sheets, totals,
+                                                //   assignments: element key -> assignment,
+                                                //   hidden: excluded element indices,
+                                                //   canEdit, sheetStatus: 'loading' | 'ready' | 'error',
+                                                //   loads: whole reads taken in so far }
+  isElementHidden(index): boolean               // excluded in the active sheet, so hidden in 3D
+  getViewerBackground():  string | null         // vim-web's background colour, '#rrggbb'
+  getViewerGhost():       DebugGhost | null     // vim-web's ghost fill: { color: '#rrggbb', opacity }
 }
 ```
+
+One test seam is not on that hook: in a dev build only, `window.__vimSatelliteTestNoUniqueId`
+(set with `addInitScript`) lists ElementIds whose UniqueId the app drops, so
+`tests/element-keys.spec.ts` can test an element with no UniqueId on the Tiny House fixture.
+
+The specs:
+
+| Spec | What it covers |
+|---|---|
+| `auth.spec.ts` | Sign-in page, the PKCE reply and its `state` check, Entra errors, sign out, silent refresh, a refused refresh, the `/config` fallback, a `401` while signed in |
+| `projects.spec.ts` | The picker by organisation, a project without a VIM, the project page (title, snapshot, role, both panes), `?project=` across a reload, back to the picker, a hidden project, the loading and download-error states |
+| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Reload (changes made on the server, a deleted active sheet, a Viewer; an edit still being written, an edit made while it reads), the viewer background, no axis widget, the ghost colour, a Display colour sampled on screen against its swatch, the DS control bar, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
+| `estimate-pricing.spec.ts` | The pure functions: pricing, totals and markups, the lump-sum carrier and missing rules, an element with no key, `applyPatch`, the cost ramp and ranks, the data colours (OKLCH lift, categorical palette), colours by level, grouping, search and the Show filter, the cost code tree, currency labels and number parsing |
+| `estimate-quantities.spec.ts` | `readFacts()` on the fixture: metric lengths, areas and volumes, material fallbacks, names from the BIM tables; element keys are the UniqueId only |
+| `write-resilience.spec.ts` | A busy server: bulk writes keep at most `WRITE_CONCURRENCY` requests in flight, transient failures are retried and land, a failure after every retry is rolled back with a toast, conditional sheet writes are read back instead of resent, a `401` is not retried |
+| `element-keys.spec.ts` | Element identity: an element with no UniqueId is listed and priced, its write controls are disabled with a reason, and bulk writes skip it |
+| `mock-server.spec.ts` | The harness itself: Range replies, data store preconditions and recorded writes, the bearer check |
+| `subpath/smoke.spec.ts` | A `BASE_PATH` build under `vite preview`: boot, favicon, the Entra redirect page |
 
 ## Deploy
 
 Push to `develop`. `.github/workflows/pages.yml` runs one job: checkout, Node 22 with an npm cache,
 `npm ci`, `npx playwright install --with-deps chromium`, `npm run build` with
 `BASE_PATH=/vim-server-satellite/`, `npm test`, `npm run test:subpath` against that build, then
-`configure-pages`, `upload-pages-artifact` over `dist`, and `deploy-pages`. A failing run uploads the Playwright HTML report, and
-`workflow_dispatch` runs the whole thing by hand.
+`configure-pages`, `upload-pages-artifact` over `dist`, and `deploy-pages`. A failing run uploads
+the Playwright HTML report, and `workflow_dispatch` runs the whole thing by hand. A newer run
+cancels one still in progress.
 
 The repository's **Pages source must be set to "GitHub Actions"**, not "Deploy from a branch": the
 workflow publishes an artifact, which a branch-based Pages setup would ignore. `public/.nojekyll` is
@@ -349,32 +629,48 @@ there because GitHub Pages otherwise runs Jekyll, which drops files whose names 
 
 ```
 src/
-  main.tsx              createRoot, vim-web/style.css, the debug hook. No <StrictMode>
+  main.tsx              createRoot, ds.css, styles.css, vim-web/style.css, <DsHost />, the debug
+                        hook. No <StrictMode>
   App.tsx               the whole app as one state machine: loading -> sign-in -> picker -> project
-  config.ts             env vars with defaults, derived Entra settings, storage keys, namespaces
+  config.ts             env vars with defaults, derived Entra settings, storage keys
   debug.ts              window.__vimSatellite, the read-only hook the tests use
   format.ts             the two date formatters the pages share
-  styles.css            plain CSS, one light theme, no framework
+  styles.css            plain CSS, layout only: colours, type and radii come from the DS tokens
+  vite-env.d.ts         the VITE_* env typings
   auth/                 pkce.ts (base64url, S256 challenge), entra.ts (the React-free flow:
                         begin, complete, refresh, session storage), AuthProvider.tsx (useAuth)
-  api/                  http.ts (the only fetch to VIM Server: bearer, ApiError, the 401 bridge),
-                        types.ts, vimServer.ts (endpoint wrappers), projectData.ts (the data store)
+  api/                  http.ts (the only fetch to VIM Server: bearer, ApiError, retries, the 401
+                        bridge), limit.ts (mapLimit), types.ts, vimServer.ts (endpoint wrappers),
+                        projectData.ts (the data store)
   pages/                SignInPage (Microsoft sign-in), ProjectPickerPage (projects by organisation),
-                        ProjectPage (header, side pane, viewer pane; resolves the snapshot URL)
-  viewer/               the single long-lived vim-web viewer: load, selection, colour overrides
-  tree/                 ModelElement, built from the VIM's BIM tables, and the element tree itself
-  labels/               the palette, the assignments, the label panel, and the writes to the data store
+                        ProjectPage (top bar over estimate panel | viewer | Cost Details;
+                        resolves the snapshot URL)
+  viewer/               ViewerPane.tsx, the single long-lived vim-web viewer: load, selection,
+                        colour overrides, hidden elements, background, ghosts, the right-click hook
+  ds/                   the vim-html-ds copy: ds.css, fonts, React components, icons (see README.md)
+  estimate/             the data layer, no JSX: types, keys (elementKey), store (every data store
+                        read and write), quantities, pricing, grouping, i18n (EN / JA), prefs
+                        (localStorage), useEstimate (state and actions)
+  estimate/ui/          the panel, the Elements and Cost Codes tabs, the tree, the footer, Cost
+                        Details, the dialogs, the menus and the keyboard shortcuts
 public/
   signin-oidc.html      one line: forwards the Entra reply fragment to the app root
   .nojekyll             stops GitHub Pages from running Jekyll over the build output
   favicon.ico           the VIM icon
 tests/
-  support/              the in-browser VIM Server (mockVimServer.ts) and the fake session (auth.ts)
+  support/              the in-browser VIM Server (mockVimServer.ts), the fake session (auth.ts),
+                        the fixture read in Node (fixture.ts)
   fixtures/             Tiny_House_Imperial.r2026.vim, 252 KB: the model the suite loads
-  subpath/              the BASE_PATH build smoke test (playwright.subpath.config.ts)
-  *.spec.ts             sign-in, projects, the viewer and labels, and the mock itself
+  subpath/              smoke.spec.ts, the BASE_PATH build smoke test
+  *.spec.ts             sign-in, projects, the estimate (end to end, pure functions, quantities),
+                        element keys, write resilience, and the mock itself
 .github/workflows/
   pages.yml             build with BASE_PATH, test, deploy to GitHub Pages
+.env.example            the VITE_* variables, all optional
+vite.config.ts          base from BASE_PATH, dev port 5173 (strict)
+playwright.config.ts    the main suite against npm run dev
+playwright.subpath.config.ts
+                        the sub-path suite against vite preview on port 4173
 ```
 
 ## Adapting the sample
@@ -388,47 +684,69 @@ origin's `signin-oidc` URI.
 `src/api/vimServer.ts` using `apiFetch<T>(path)`. The bearer token, `Accept`, the CORS mode, error
 translation and the 401 handling all come from `http.ts` for free. For a write, spread
 `jsonBody(value)` into the init and set `method`. To handle a status yourself instead of throwing —
-`404` for "absent" — use `apiRequest(path, { allowStatus: [404] })` and read the `Response`. A `412`
-is deliberately *not* allow-listed: it is thrown like any other failure, and the palette write catches
-it to retry.
+`404` for "absent" — use `apiRequest(path, { allowStatus: [404] })` and read the `Response`. Add
+`retry: true` only when the request is safe to send twice. A `412` is deliberately *not*
+allow-listed: it is thrown like any other failure, and the sheet write (`updateSheet()` in
+`src/estimate/store.ts`) catches it to retry.
 
-**Store your own data.** Add a namespace to `namespaces` in `src/config.ts` and use
-`src/api/projectData.ts` as it is. The store is namespace plus key to arbitrary JSON (Postgres
-`jsonb`), scoped to one project and gated by project membership, which makes it the right place for
-anything a satellite app keeps per project: view states, annotations, review status, issue links, a
-cached derived index. Keys must not contain `/`. Read with `getEntry()` and write with
-`putEntry(..., { ifMatch })` when two users could collide, or `{ ifNoneMatch: '*' }` for a write that
-must not overwrite an existing entry; use `putEntries()` and `deleteEntries()` when one user action
-touches many keys — one request beats fifty.
+**Store your own data.** Pick a namespace prefix of your own (the estimate uses `estimate.*`, all of
+it in `src/estimate/store.ts`) and use `src/api/projectData.ts` as it is. The store is namespace plus
+key to arbitrary JSON (Postgres `jsonb`), scoped to one project and gated by project membership,
+which makes it the right place for anything a satellite app keeps per project: view states,
+annotations, review status, issue links, a cached derived index. Keys must not contain `/`. Read
+with `getEntry()` and write with `putEntry(..., { ifMatch })` when two users could collide, or
+`{ ifNoneMatch: '*' }` for a write that must not overwrite an existing entry; use `putEntries()` and
+`deleteEntries()` when one user action touches many keys — one request beats fifty — and
+`deleteNamespace()` to drop a namespace whole. Send many batches through `mapLimit()` rather than
+all at once.
 
-**Replace the label feature.** `src/labels/` is deliberately a leaf. It is handed the
-`ModelElement[]` built by `src/tree/`, plus the current selection, and it gives back a map of
-element index to colour that the viewer applies. Anything that consumes a selection and produces
-colours can take its place — a QA checklist, a cost lookup, a clash list, a progress overlay — with
-no change to the auth, API or viewer code. Delete the folder and its wiring in `ProjectPage.tsx` and
-the rest of the app still runs.
+**Replace the estimate.** `src/estimate/` is deliberately a leaf. `ProjectPage.tsx` hands
+`useEstimate(projectId, role, vim)` the loaded model and the project role, and shares the selection
+with the panel; the estimate gives back a map of element index to colour and a set of hidden
+elements, which the viewer applies. Anything that consumes a selection and produces colours can take
+its place — a QA checklist, a clash list, a progress overlay — with no change to the auth, API or
+viewer code. Delete the folder and its wiring in `ProjectPage.tsx` and `src/debug.ts`, and the rest
+of the app still runs.
 
 ## Known limitations
 
 This is a sample, and it stops where a product would keep going.
 
+- **VIM Server is unreliable under load until a server-side fix is deployed.** It answers some API
+  calls with a 5xx, or with a redirect to the Entra sign-in page that the browser reports as a CORS
+  error. The app limits its concurrency (`WRITE_CONCURRENCY`) and retries idempotent requests (see
+  **Busy server** under [Estimate data in the store](#estimate-data-in-the-store)); a request that
+  still fails after every retry is reported and its change taken back.
 - **vim-web is pinned to `1.0.0-beta.3`, exactly.** It is a beta with no back-compatibility shims,
   and another beta can move the API. `three` is a dependency of vim-web and must not be added
   separately: use `VIM.THREE`, or a page ends up with two copies of three.js.
-- **One label per element.** `satellite.labels` holds a single assignment per element key. Several
-  labels per element would need an array value and a rule for which colour wins.
+- **Bulk changes are not atomic.** A change to more than 1,000 entries is several batch requests.
+  When one fails after every retry, the batches already stored stay stored, while the screen takes
+  the whole change back and reads the estimate again, so it then shows a partly applied change.
+- **Deletes are not transactions.** A sheet delete is two requests (its namespace, then its entry),
+  and a cost code or work package delete is a clean-up of every sheet, then the entry. A failure
+  between the steps leaves an empty sheet, or a code that some sheets no longer use; the app reports
+  it and re-reads.
+- **An assignment is written whole.** Assignments are last-write-wins per element: when two people
+  change different fields of the same element (one the cost code, the other the note) at the same
+  moment, the later write keeps only its own copy of the entry. Field-level merges would need a
+  read–modify–write per element, which costs a request per element.
+- **No live updates.** The estimate is read when the project opens, after a failed write, on Retry
+  and on Reload; changes other people make show up on the next read.
+- **No paging anywhere.** The project list fans out over every organisation, and each data store
+  namespace is read with one list call with `take` omitted, meaning "all entries". A large sheet
+  (about 100,000 assignments) is one large response.
+- **A cost code text is unique by convention only.** Two people who add a code at the same moment
+  get two ids, and may both get the automatic code text `USER-<n>`.
 - **A UniqueId can repeat across linked models.** A Revit `UniqueId` is unique inside one document,
-  not across a set of linked documents, so in a federated model two elements can share a label key.
-  A real app would prefix the key with the source document id.
-- **Elements with no UniqueId fall back to `id-<elementId>`**, which is not stable across a
-  re-export, and an element with no Revit id either falls back to `index-<row>`, which is only
-  meaningful for the loaded snapshot. Those labels can drift onto the wrong element, or be lost,
-  when a new snapshot lands.
+  not across a set of linked documents, so in a federated model two elements can share an
+  assignment key. A real app would prefix the key with the source document id.
+- **Elements with no UniqueId cannot be estimated** beyond their default (unassigned, included).
+  Entries stored under the older `id-…` or `index-…` keys are ignored; they are not migrated or
+  deleted.
 - **No Entra end-session on sign out.** The app forgets its own tokens, but the Microsoft session in
   the browser stays, so the next sign-in is usually silent, and signing in as a different user needs
   a Microsoft sign-out.
 - **Tokens live in `localStorage`**, which any script on the origin can read, and they outlive the
   tab. That is the usual trade-off for a static SPA with no backend of its own; weigh it before
   copying the pattern into something that matters.
-- **No paging anywhere.** The project list fans out over every organisation, and the data store is
-  read with `take` omitted, meaning "all entries". Fine at the sizes this sample sees.

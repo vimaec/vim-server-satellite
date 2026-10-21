@@ -1,26 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
+import type * as VIM from 'vim-web'
 import { getProject, getProjectRole, getVimDownloadUrl, getVimHistory } from '../api/vimServer'
 import type { BlobSummary } from '../api/types'
 import { useAuth } from '../auth/AuthProvider'
-import { setDebugAssignments, setDebugColors, setDebugSelection } from '../debug'
+import { setDebugColors, setDebugEstimate, setDebugSelection } from '../debug'
+import { Button, Chip, Label, Menu } from '../ds'
+import type { MenuEntry } from '../ds'
+import { useEstimate } from '../estimate/useEstimate'
+import { EstimateUiProvider, useEstimateUi } from '../estimate/ui/context'
+import { CostDetails } from '../estimate/ui/CostDetails'
+import { EstimatePanel } from '../estimate/ui/EstimatePanel'
+import { elementMenu } from '../estimate/ui/menus'
+import { useElementsView } from '../estimate/ui/useElementsView'
 import { formatDateTime } from '../format'
-import { labelColors } from '../labels/colors'
-import { LabelPanel } from '../labels/LabelPanel'
-import { useLabels } from '../labels/useLabels'
-import { buildModel } from '../tree/buildModel'
-import type { ModelElement } from '../tree/buildModel'
-import { ElementTree } from '../tree/ElementTree'
-import type { SelectMode } from '../tree/ElementTree'
 import { ViewerPane } from '../viewer/ViewerPane'
-import type { ViewerStatus } from '../viewer/ViewerPane'
+import type { ViewerStatus, ViewerTexts } from '../viewer/ViewerPane'
+
+type IWebglVim = VIM.Core.Webgl.IWebglVim
 
 /** What the viewer needs: the snapshot's time-limited SAS URL. */
 type Source = { url: string }
 
+/** The panel's narrowest width, and the share of the window it starts with. */
+const PANEL_MIN = 380
+const PANEL_INITIAL = 0.46
+/** The Cost Details pane's narrowest and starting widths. */
+const DETAILS_MIN = 260
+const DETAILS_INITIAL = 340
+/** What the 3D view keeps however wide the two panes are dragged. */
+const VIEWER_MIN = 240
+
 /**
- * The project workspace: element tree and labels on the left, the 3D viewer on
- * the right. This page owns the two pieces of state both sides share — the
- * selection and the loaded model — so neither pane has to know about the other.
+ * The project workspace: `[ estimate panel | 3D viewer | Cost Details ]` under
+ * the top bar. This page owns what the panes share — the selection, the loaded
+ * model, the estimate — so none of them has to know about the others.
+ *
+ * One instance per project (App keys it by the project id): nothing of one
+ * project, its role above all, may survive into the next.
  */
 export function ProjectPage({
   projectId,
@@ -42,13 +59,12 @@ export function ProjectPage({
   const [resolving, setResolving] = useState(true)
 
   const [selection, setSelection] = useState<number[]>([])
-  const [model, setModel] = useState<ModelElement[]>([])
+  const [vim, setVim] = useState<IWebglVim | undefined>(undefined)
   const [viewerStatus, setViewerStatus] = useState<ViewerStatus>('idle')
 
-  const labels = useLabels(projectId, role)
-  const frameRef = useRef<(() => void) | null>(null)
-  /** Guards against an older buildModel() finishing after a newer one. */
-  const modelTokenRef = useRef(0)
+  const est = useEstimate(projectId, role, vim)
+  const view = useElementsView(est)
+  const frameElementsRef = useRef<((indices: number[]) => void) | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -56,22 +72,21 @@ export function ProjectPage({
     setSourceError('')
     setResolving(true)
     setSelection([])
-    setModel([])
 
     void (async () => {
       try {
-        const [detail, projectRole, vim] = await Promise.all([
+        const [detail, projectRole, history] = await Promise.all([
           getProject(projectId),
-          // The role only gates the label editor, so a failure here falls back
-          // to the least privilege rather than failing the page.
+          // The role only gates editing, so a failure here falls back to the
+          // least privilege rather than failing the page.
           getProjectRole(projectId).catch(() => ({ projectId, role: 'Viewer' })),
           getVimHistory(projectId),
         ])
         if (cancelled) return
         setName(detail.name)
         setRole(projectRole.role)
-        setSnapshot(vim.latest)
-        if (!vim.latest) {
+        setSnapshot(history.latest)
+        if (!history.latest) {
           setResolving(false)
           return
         }
@@ -94,143 +109,201 @@ export function ProjectPage({
     }
   }, [projectId])
 
-  const onVimLoaded = useCallback((vim: Parameters<typeof buildModel>[0] | undefined) => {
-    const token = ++modelTokenRef.current
+  const onVimLoaded = useCallback((loaded: IWebglVim | undefined) => {
     setSelection([])
-    if (!vim) {
-      setModel([])
-      return
-    }
-    void buildModel(vim).then((elements) => {
-      if (token === modelTokenRef.current) setModel(elements)
-    })
+    setVim(loaded)
   }, [])
 
-  const selectElements = useCallback((indices: number[], mode: SelectMode) => {
-    setSelection((previous) => {
-      if (mode === 'replace') return indices
-      const next = new Set(previous)
-      for (const index of indices) {
-        if (mode === 'add' || !next.has(index)) next.add(index)
-        else next.delete(index)
-      }
-      return [...next]
-    })
-  }, [])
-
-  const elementByIndex = useMemo(
-    () => new Map(model.map((element) => [element.index, element])),
-    [model],
-  )
-  const selectedElements = useMemo(
-    () =>
-      selection
-        .map((index) => elementByIndex.get(index))
-        .filter((element): element is ModelElement => element !== undefined),
-    [elementByIndex, selection],
-  )
-  const colors = useMemo(
-    () => labelColors(labels.assignments, labels.palette, model),
-    [labels.assignments, labels.palette, model],
-  )
+  const frameElements = useCallback((indices: number[]) => frameElementsRef.current?.(indices), [])
 
   // Feed the read-only debug hook the tests read.
   useEffect(() => setDebugSelection(selection), [selection])
-  useEffect(() => setDebugColors(colors), [colors])
-  useEffect(() => setDebugAssignments(labels.assignments), [labels.assignments])
-
-  const frame = useCallback(() => frameRef.current?.(), [])
-
-  // Clicking a row in the labelled list selects and frames that element. The
-  // camera has to move after the viewer has the new selection, so it is done in
-  // an effect: a child's effects run before its parent's, which means
-  // ViewerPane has already pushed the selection by the time this runs.
-  const [frameRequest, setFrameRequest] = useState(0)
-  const pickElement = useCallback((index: number) => {
-    setSelection([index])
-    setFrameRequest((request) => request + 1)
-  }, [])
+  useEffect(() => setDebugColors(view.paint.colors), [view.paint.colors])
   useEffect(() => {
-    if (frameRequest > 0) frameRef.current?.()
-  }, [frameRequest])
+    setDebugEstimate(est.status === 'ready' ? est : null)
+  }, [est])
+  useEffect(() => () => setDebugEstimate(null), [])
 
-  const treePlaceholder = resolving
-    ? 'Opening the project…'
-    : viewerStatus === 'loading'
-      ? 'Loading the model…'
-      : viewerStatus === 'idle'
-        ? 'No VIM in this project yet.'
-        : undefined
+  const { t } = est
+  const viewerTexts = useMemo(
+    (): ViewerTexts => ({
+      idle: t('No VIM in this project yet.'),
+      loading: t('Loading the snapshot…'),
+      loaded: t('Loaded'),
+      error: t('Could not load the snapshot.'),
+      resolving: t('Opening the project…'),
+    }),
+    [t],
+  )
+  const modelPlaceholder = resolving
+    ? t('Opening the project…')
+    : sourceError || viewerStatus === 'error'
+      ? undefined
+      : viewerStatus === 'loading'
+        ? t('Loading the model…')
+        : viewerStatus === 'idle'
+          ? t('No VIM in this project yet.')
+          : undefined
 
   return (
     <main className="page" data-testid="project-page">
       <header className="topbar">
-        <button type="button" data-testid="back-to-projects" onClick={onBack}>
-          ← Projects
-        </button>
-        <h1 data-testid="project-title">{name || 'Project'}</h1>
+        <Button variant="ghost" icon="back" data-testid="back-to-projects" onClick={onBack}>
+          {t('Projects')}
+        </Button>
+        <Label as="h1" variant="title" truncate data-testid="project-title">
+          {name || t('Project')}
+        </Label>
         {snapshot ? (
-          <span className="tag" data-testid="snapshot-tag" title={formatDateTime(snapshot.created)}>
+          <Chip data-testid="snapshot-tag" tip={formatDateTime(snapshot.created)}>
             {snapshot.versionTag}
-          </span>
+          </Chip>
         ) : (
-          <span className="tag muted" data-testid="snapshot-tag">
-            {resolving ? '…' : 'no VIM'}
-          </span>
+          <Chip data-testid="snapshot-tag">{resolving ? '…' : t('no VIM')}</Chip>
         )}
-        <span className="badge" data-testid="role-badge">
-          {role || '…'}
-        </span>
+        <Chip data-testid="role-badge">{role || '…'}</Chip>
         <div className="topbar-right">
-          <span className="user" data-testid="user-name">
+          <Label className="user" variant="dim" truncate data-testid="user-name">
             {auth.session?.name ?? ''}
-          </span>
-          <button type="button" data-testid="sign-out" onClick={auth.signOut}>
-            Sign out
-          </button>
+          </Label>
+          <Button variant="ghost" data-testid="sign-out" onClick={auth.signOut}>
+            {t('Sign out')}
+          </Button>
         </div>
       </header>
 
-      <div className="panes">
-        <aside className="side-pane" data-testid="side-pane">
-          <ElementTree
-            elements={model}
-            selection={selection}
-            colors={colors}
-            onSelect={selectElements}
-            onFrame={frame}
-            placeholder={treePlaceholder}
-          />
-          <LabelPanel
-            labels={labels.palette.labels}
-            assignments={labels.assignments}
-            elements={model}
-            status={labels.status}
-            error={labels.error}
-            canEdit={labels.canEdit}
-            loadFailed={labels.loadFailed}
-            onRetry={labels.retry}
-            selectionCount={selectedElements.length}
-            onApply={(labelId) => labels.applyLabel(labelId, selectedElements)}
-            onRemove={() => labels.removeLabel(selectedElements)}
-            onAdd={labels.addLabel}
-            onDelete={labels.deleteLabel}
-            onPick={pickElement}
-          />
-        </aside>
-
-        <ViewerPane
-          source={source}
-          resolving={resolving}
-          sourceError={sourceError}
-          selection={selection}
-          colors={colors}
-          onVimLoaded={onVimLoaded}
-          onSelectionChanged={setSelection}
-          onStatus={setViewerStatus}
-          frameRef={frameRef}
+      <EstimateUiProvider
+        est={est}
+        view={view}
+        selection={selection}
+        setSelection={setSelection}
+        frameElements={frameElements}
+      >
+        <Workspace
+          modelPlaceholder={modelPlaceholder}
+          viewer={(onContextMenu) => (
+            <ViewerPane
+              source={source}
+              resolving={resolving}
+              sourceError={sourceError}
+              selection={selection}
+              colors={view.paint.colors}
+              hidden={est.hidden}
+              onVimLoaded={onVimLoaded}
+              onSelectionChanged={setSelection}
+              onStatus={setViewerStatus}
+              frameElementsRef={frameElementsRef}
+              onContextMenu={onContextMenu}
+              texts={viewerTexts}
+            />
+          )}
         />
-      </div>
+      </EstimateUiProvider>
     </main>
+  )
+}
+
+/**
+ * The three panes and their two drag handles. Inside the estimate context, so
+ * the 3D menu and the Cost Details pane can use its verbs.
+ */
+function Workspace(props: {
+  modelPlaceholder?: string
+  viewer: (onContextMenu: (x: number, y: number) => void) => JSX.Element
+}): JSX.Element {
+  const ui = useEstimateUi()
+  const { t } = ui.est
+  const panesRef = useRef<HTMLDivElement>(null)
+  /** Null until dragged: the panel then keeps its share of the window. */
+  const [panelWidth, setPanelWidth] = useState<number | null>(null)
+  const [detailsWidth, setDetailsWidth] = useState(DETAILS_INITIAL)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuEntry[] } | null>(null)
+  const uiRef = useRef(ui)
+  uiRef.current = ui
+
+  const onViewerMenu = useCallback((x: number, y: number) => {
+    const current = uiRef.current
+    if (current.est.status !== 'ready') return
+    const targets = current.selection
+    setMenu({ x, y, items: elementMenu(current, targets, { copyFrom: targets.length === 1 ? targets[0] : null }) })
+  }, [])
+
+  /** A drag on a handle: `measure` turns the pointer's x into the pane's new width. */
+  const drag = (measure: (x: number, box: DOMRect) => number, apply: (width: number) => void) =>
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      const box = panesRef.current?.getBoundingClientRect()
+      if (!box) return
+      event.preventDefault()
+      const handle = event.currentTarget
+      handle.setPointerCapture(event.pointerId)
+      handle.classList.add('ds-active')
+      const onMove = (move: PointerEvent): void => apply(measure(move.clientX, box))
+      const onUp = (): void => {
+        handle.classList.remove('ds-active')
+        handle.removeEventListener('pointermove', onMove)
+        handle.removeEventListener('pointerup', onUp)
+        handle.removeEventListener('pointercancel', onUp)
+      }
+      handle.addEventListener('pointermove', onMove)
+      handle.addEventListener('pointerup', onUp)
+      handle.addEventListener('pointercancel', onUp)
+    }
+
+  const detailsRoom = detailsOpen ? detailsWidth : 0
+  const panelDrag = drag(
+    (x, box) => x - box.left,
+    (width) => {
+      const box = panesRef.current?.getBoundingClientRect()
+      const max = (box?.width ?? Infinity) - detailsRoom - VIEWER_MIN
+      setPanelWidth(Math.max(PANEL_MIN, Math.min(max, width)))
+    },
+  )
+  const detailsDrag = drag(
+    (x, box) => box.right - x,
+    (width) => {
+      const box = panesRef.current?.getBoundingClientRect()
+      const panel = panelWidth ?? (box?.width ?? 0) * PANEL_INITIAL
+      const max = (box?.width ?? Infinity) - Math.max(PANEL_MIN, panel) - VIEWER_MIN
+      setDetailsWidth(Math.max(DETAILS_MIN, Math.min(Math.max(DETAILS_MIN, max), width)))
+    },
+  )
+
+  return (
+    <div className="panes" ref={panesRef}>
+      <div
+        className="en-side"
+        style={{ width: panelWidth ?? `${PANEL_INITIAL * 100}%`, minWidth: PANEL_MIN }}
+      >
+        <EstimatePanel modelPlaceholder={props.modelPlaceholder} />
+      </div>
+      <div className="ds-split__handle" role="separator" aria-orientation="vertical" data-testid="panel-resizer" onPointerDown={panelDrag} />
+      <div className="en-stage">
+        {props.viewer(onViewerMenu)}
+        {!detailsOpen && ui.selection.length > 0 ? (
+          <div className="en-stage__float">
+            <Button tip={t('Open the cost details panel')} data-testid="cost-details-open" onClick={() => setDetailsOpen(true)}>
+              {t('Cost Details')}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      {detailsOpen ? (
+        <>
+          <div className="ds-split__handle" role="separator" aria-orientation="vertical" data-testid="details-resizer" onPointerDown={detailsDrag} />
+          <div className="en-details" style={{ width: detailsWidth }}>
+            <CostDetails onClose={() => setDetailsOpen(false)} />
+          </div>
+        </>
+      ) : null}
+      <Menu
+        open={menu !== null}
+        x={menu?.x ?? 0}
+        y={menu?.y ?? 0}
+        items={menu?.items ?? []}
+        onClose={() => setMenu(null)}
+        data-testid="context-menu"
+      />
+    </div>
   )
 }

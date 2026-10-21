@@ -1,19 +1,13 @@
-/* Plain CSS, light theme, no framework. Layout is one column: a short header
-   over a flex row that fills whatever is left of the window. */
+/* The app's own rules: LAYOUT ONLY. Every colour, font, border and radius comes
+   from the vim-html-ds tokens in src/ds/ds.css (dark theme; <body class="ds-root">
+   sets the page fill and base type). Layout is one column: a top bar over a
+   flex row that fills whatever is left of the window. */
 
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --border: #d8dce2;
-  --text: #1b1f24;
-  --muted: #6b7280;
-  --accent: #1f6feb;
-  --error: #c02a2a;
-  --radius: 6px;
-}
-
-* {
-  box-sizing: border-box;
+  /* The top bar height. The DS toaster reads --vf-titlebar-h to sit below the
+     host's title bar; here that bar is ours. */
+  --app-topbar-h: 40px;
+  --vf-titlebar-h: var(--app-topbar-h);
 }
 
 html,
@@ -23,107 +17,22 @@ body,
   margin: 0;
 }
 
-body {
-  font:
-    14px/1.45 system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-  color: var(--text);
-  background: var(--bg);
-}
-
-h1 {
-  font-size: 15px;
-  font-weight: 600;
+/* Headings keep their meaning; the DS label classes give them their look. */
+h1,
+h2,
+h3 {
   margin: 0;
 }
 
-h2 {
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0 0 6px;
-}
-
-p {
-  margin: 0 0 10px;
-}
-
-.muted {
-  color: var(--muted);
-}
-
-.small {
-  font-size: 12px;
-}
-
-.error {
-  color: var(--error);
-}
-
-/* --- buttons ------------------------------------------------------------ */
-
-button {
-  font: inherit;
-  color: inherit;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  border-color: #b9c0c9;
-}
-
-button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-button.primary {
-  color: #fff;
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-/* --- sign-in ------------------------------------------------------------ */
+/* --- page frame --------------------------------------------------------- */
 
 .centered {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
-  padding: 20px;
+  padding: var(--ds-space-5);
 }
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 380px;
-  padding: 22px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-}
-
-.card p {
-  margin: 0;
-}
-
-input {
-  font: inherit;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-/* --- page frame --------------------------------------------------------- */
 
 .page {
   display: flex;
@@ -135,77 +44,86 @@ input {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  gap: var(--ds-space-2);
+  height: var(--app-topbar-h);
+  padding: 0 var(--ds-space-3);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--stage-900);
+}
+
+/* A long project name gives way before the chips and the user menu do. */
+.topbar > .ds-label--title {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .topbar-right {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 10px;
+  gap: var(--ds-space-2);
   margin-left: auto;
 }
 
 .user {
-  font-size: 12px;
-  color: var(--muted);
   max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tag,
-.badge {
-  padding: 1px 7px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.badge {
-  color: var(--muted);
 }
 
 .scroll {
   flex: 1;
   overflow: auto;
-  padding: 16px;
+  padding: var(--ds-space-4);
+}
+
+/* --- sign-in ------------------------------------------------------------ */
+
+.signin-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.signin-card p {
+  margin: 0;
 }
 
 /* --- project picker ----------------------------------------------------- */
 
-.org {
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
   max-width: 720px;
-  margin: 0 0 18px;
 }
 
 .projects {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* Each row is a real <button> (a disabled project must be a disabled control),
+   so the browser's button look comes off and ds-list__item's takes over. The
+   hairline goes between list items: the button is the only child of its <li>,
+   so ds-list's own :last-child rule would drop every line. */
 .project {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   width: 100%;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  line-height: inherit;
   text-align: left;
 }
 
-.project-name {
-  font-weight: 500;
+.projects > li:not(:last-child) > .project {
+  border-bottom: 1px solid var(--hairline);
 }
 
-.project .badge {
-  margin-left: auto;
+.project:disabled {
+  cursor: default;
+}
+
+.ds-list--selectable .project:disabled:hover {
+  background: transparent;
 }
 
 /* --- project panes ------------------------------------------------------ */
@@ -216,246 +134,899 @@ input {
   min-height: 0;
 }
 
-/* The side pane is a column: the tree takes the space that is left, the label
-   panel keeps its place at the bottom. Each scrolls on its own. */
-.side-pane {
-  display: flex;
-  flex: 0 0 340px;
-  flex-direction: column;
-  min-height: 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-}
-
-/* position: relative is required: vim-web pins its canvas to inset:0 here. */
+/* position: relative is required: vim-web pins its canvas to inset:0 here.
+   isolation keeps vim-web's own z-index scale (its --z-modal is 40) inside the
+   pane, so the DS menus, dialogs and toasts on document.body stay on top. Its
+   background is VIEWER_BACKGROUND in ViewerPane.tsx, one colour with the renderer's. */
 .viewer-pane {
   position: relative;
   flex: 1;
   min-width: 0;
-  background: #e9ecef;
+  isolation: isolate;
 }
 
-/* Floats over the canvas, out of the way of vim-web's own control bar. */
+/* Floats over the canvas, out of the way of vim-web's own control bar. The DS
+   banner language: a flat fill with a cyan keyline, red for an error. */
 .viewer-status {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: var(--ds-space-2);
+  left: var(--ds-space-2);
   z-index: 20;
-  max-width: calc(100% - 16px);
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgb(255 255 255 / 88%);
-  font-size: 11px;
-  color: var(--muted);
+  max-width: calc(100% - 2 * var(--ds-space-2));
+  padding: var(--ds-space-1) var(--ds-space-2);
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--vim-cyan);
+  background: var(--stage-800);
+  color: var(--text-200);
+  font-size: var(--ds-fs-label);
 }
 
 .viewer-status[data-state='error'] {
-  border-color: var(--error);
-  color: var(--error);
+  border-left-color: var(--bad);
 }
 
-/* Once the model is on screen the pill has nothing left to say, and it would
+/* Once the model is on screen the status has nothing left to say, and it would
    sit on top of the viewer's own logo. */
 .viewer-status[data-state='loaded'] {
   display: none;
 }
 
-/* --- element tree ------------------------------------------------------- */
+/* === vim-web control bar, in the DS theme ==================================
+   vim-web draws its bar as white pills with shadows (node_modules/vim-web/
+   dist/style.css, "Control Bar"); these rules give it the DS colours: flat
+   --stage fills, 1px hairlines, no shadow, no transition. The buttons follow
+   .ds-iconbtn (ds.css): the same size, fill, active and disabled look, but
+   round: capsule groups and circle buttons (see the section rule).
 
-.tree {
+   vim-web's markup: .vim-control-bar holds one .vim-control-bar-section per
+   group, each holding .vim-control-bar-button elements with
+     data-on       "true" / "false"
+     data-variant  default          data-on = the mode or toggle is on
+                   expand           the same (Enable Section Box)
+                   disabled         data-on = available; "false" = disabled
+                   disabled-default the same, and "true" also shows as on
+                                    (Clear Selection, while there is one)
+   When the pane is too narrow, the groups wrap to a second row (Settings /
+   Help / Fullscreen first). Scoped to .viewer-pane, the only vim-web host. */
+
+.viewer-pane .vim-control-bar {
+  bottom: var(--ds-space-2);
+  gap: var(--ds-space-2);
+  transition: none;
+}
+
+/* One group: a common region, a capsule with a hairline.
+   Not the DS envelope (it rounds fully only for dots): the operator asked for it.
+   The same padding on all sides keeps each end button concentric with the
+   capsule end: outer radius 18 px (half of 26 + 2 x 4 + 2 x 1), inner radius
+   13 px (the circle), so the gap between them is 4 px all round. */
+.viewer-pane .vim-control-bar-section {
+  gap: var(--ds-space-1);
+  margin-bottom: 0;
+  padding: var(--ds-space-1);
+  border: 1px solid var(--hairline);
+  border-radius: 9999px;
+  background: var(--stage-800);
+  box-shadow: none;
+}
+
+.viewer-pane .vim-control-bar-button {
+  width: var(--ds-control-h);
+  height: var(--ds-control-h);
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-300);
+  transition: none;
+}
+
+/* vim-web draws its icons at 20 px; the DS icon button holds a 14 px SVG
+   (.ds-iconbtn__svg). Block, so it does not sit on a text baseline. */
+.viewer-pane .vim-control-bar-button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* Hover: the .ds-iconbtn fill and text, with a hairline border (as
+   .ds-btn--ghost:hover) rather than its cyan one, so that cyan only ever
+   means "on" in a bar where a mode is always on. */
+.viewer-pane .vim-control-bar-button:hover {
+  transform: none;
+  border-color: var(--hairline-soft);
+  background: var(--stage-600);
+  color: var(--text-100);
+}
+
+/* vim-web turns its own focus ring off; keyboard users get the DS one. The
+   outline follows the button's radius, so it is a circle too. */
+.viewer-pane .vim-control-bar-button:focus-visible {
+  outline: 1px solid var(--vim-cyan);
+  outline-offset: 1px;
+}
+
+/* On (a mode, a toggle): .ds-iconbtn.ds-active, an opaque cyan tint. For the
+   "disabled" variant data-on only means "available", so it is not "on". */
+.viewer-pane .vim-control-bar-button:not([data-variant='disabled'])[data-on='true'] {
+  border-color: var(--vim-cyan);
+  background: color-mix(in srgb, var(--vim-cyan) var(--vim-cyan-tint-pct), var(--stage-700));
+  color: var(--text-100);
+}
+
+/* Not available now (nothing selected, nothing hidden): the DS disabled look.
+   vim-web already takes the pointer events away. */
+.viewer-pane .vim-control-bar-button[data-variant^='disabled'][data-on='false'] {
+  color: var(--text-300);
+  opacity: 0.4;
+}
+
+/* The bar's hover tips. vim-web portals them to document.body, out of
+   .viewer-pane, so this one rule is not scoped; the class is vim-web's own.
+   The DS tooltip (.ds-tip) look. `body` outranks vim-web's own rule, which
+   loads after this file. */
+body .vim-tooltip-portal {
+  padding: 5px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--stage-700);
+  color: var(--text-100);
+  font-family: var(--font-body);
+  font-size: var(--ds-fs-small);
+  line-height: 1.35;
+  box-shadow: none;
+}
+
+/* The panels the bar opens (Settings on the side; Render Settings and Section
+   Box Offsets floating over it). vim-web paints them from its own palette
+   variables, so they are re-pointed at DS tokens here, for these panels only:
+   the light greys become stage fills and hairlines, the dark greys text. */
+.viewer-pane .vim-side-panel,
+.viewer-pane .vim-panel {
+  --c-white: var(--stage-800);
+  --c-lightest-gray: var(--stage-800);
+  --c-light-gray: var(--stage-600);
+  --c-gray-divider: var(--hairline);
+  --c-medium-gray: var(--text-300);
+  --c-dark-gray-cool: var(--text-300);
+  --c-dark-gray-warm: var(--text-200);
+  --c-darker-gray: var(--text-200);
+  --c-primary: var(--vim-cyan);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  color: var(--text-200);
+}
+
+/* A floating panel over the 3D view: a hairline edge, as a DS menu surface. */
+.viewer-pane .vim-panel-overlay .vim-panel {
+  border: 1px solid var(--hairline);
+}
+
+/* vim-web leaves the text of its text boxes and selects to the browser
+   (black on white); the DS input look. */
+.viewer-pane .vim-settings-textbox {
+  border-color: var(--hairline);
+  background: var(--stage-900);
+  color: var(--text-100);
+}
+
+.viewer-pane .vim-select-trigger {
+  color: var(--text-100);
+}
+
+/* Its options as DS menu items: a cyan tint on hover, the current one cyan. */
+.viewer-pane .vim-select-option:hover {
+  background: var(--vim-cyan-tint);
+  color: var(--text-100);
+}
+
+.viewer-pane .vim-select-option[data-selected] {
+  color: var(--vim-cyan);
+}
+
+/* The "[0, 1]" range hints, in the light grey that is now a fill. */
+.viewer-pane .vim-panel-entry-info {
+  color: var(--text-400);
+}
+
+/* === Estimate =============================================================
+   The workspace is [ estimate panel | 3D viewer | Cost Details ], with DS split
+   handles between them. The panel's rules are estimate.html's .en-* / .ed-*
+   layout, on DS tokens. */
+
+:root {
+  /* The upper end of the Costs colours in 3D (data, not UI, as estimate.html):
+     orange at the 90th percentile, red at the top. pricing.ts costRamp() reads them
+     and lifts them for the 3D view (liftColor), as it does the DS green and amber. */
+  --en-cost-warm: #ee8a2e;
+  --en-cost-hot: #e2483d;
+  /* One tree row, and the inline controls drawn to fit in it. */
+  --en-row-h: 26px;
+  --en-cell-h: 20px;
+  /* Where a depth-0 tree row's label starts after its toggle: the DS toggle's
+     padding (14) + the caret triangle (5) + the caret's margin (7), as in
+     ds.css's own column-header indent (.ds-cols > .ds-tree__check + .ds-cols__col). */
+  --en-label-indent: calc(14px + 5px + 7px);
+  /* Letter spacing of the DS mono labels; ds.css has no token for it, so these
+     mirror its classes: the eyebrow (.ds-label--eyebrow, 1px) and the column
+     header / form label (.ds-cols__col, .ds-formfield__label, 0.6px). */
+  --en-track-eyebrow: 1px;
+  --en-track-header: 0.6px;
+}
+
+.en-side {
   display: flex;
-  flex: 1;
-  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
   min-height: 0;
 }
 
-.tree-toolbar {
+.en-stage {
+  position: relative;
   display: flex;
-  flex: 0 0 auto;
-  gap: 6px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.tree-toolbar input {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.tree-rows {
-  flex: 1;
+/* Floats in the 3D view's top-right corner while something is selected and
+   the pane is closed (where estimate.html puts it). The viewer has no axis
+   widget there (ViewerPane turns it off), so the button takes the corner, with
+   the same inset as the viewer status in the opposite corner. Above the
+   viewer, which isolates its own stacking. */
+.en-stage__float {
+  position: absolute;
+  top: var(--ds-space-2);
+  right: var(--ds-space-2);
+  z-index: 30;
+}
+
+/* vim-web's modal (the control bar's Help) covers the 3D view and has its
+   close button in this same corner, so the float steps aside while it is open. */
+.en-stage:has(.vim-modal) .en-stage__float {
+  display: none;
+}
+
+.en-details {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* --- the panel ---------------------------------------------------------- */
+
+/* The head's language switch keeps its size in a narrow panel. */
+.en-panel .ds-panel__actions,
+.en-panel .ds-panel__actions > * {
+  flex: 0 0 auto;
+}
+
+/* The body is a column that does not scroll itself: the trees inside do.
+   Its sides keep the panel padding; the tab strip sits right under the head. */
+.en-panel > .ds-panel__body.en-body {
+  gap: 0;
+  padding: 0 var(--ds-space-3);
+  overflow: hidden;
+}
+
+.en-body > * {
+  flex: none;
+}
+
+.en-body > .ds-tabpanel.ds-open {
+  flex: 1 1 auto;
+  gap: 0;
+  min-height: 0;
+}
+
+.en-body > .ds-empty-fill {
+  flex: 1 1 auto;
+}
+
+.en-state,
+.en-banner {
+  margin-top: var(--ds-space-3);
+}
+
+.en-tabs .ds-tab {
+  font-size: var(--ds-fs-value);
+}
+
+/* The foot is the footer's own box (it pads itself and wraps). */
+.en-panel > .ds-panel__foot {
+  display: block;
+  padding: 0;
+}
+
+/* On the DS eyebrow label (<Label variant="eyebrow">): it only must not wrap. */
+.en-eyebrow {
+  white-space: nowrap;
+}
+
+/* --- Elements tab chrome ------------------------------------------------ */
+
+/* A row label sits on the line of its row's FIRST control line, also when a
+   narrow panel wraps the controls onto two lines. */
+.en-chrome > .en-eyebrow {
+  line-height: var(--ds-control-h);
+}
+
+/* Labels in one column, controls in the other: every control row starts on
+   the same line, in any language. */
+.en-chrome {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--ds-space-2) var(--ds-space-3);
+  align-items: start;
+  padding: var(--ds-space-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.en-line,
+.en-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  align-items: center;
+  min-width: 0;
+  min-height: var(--ds-control-h);
+}
+
+.en-line__end {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: center;
+  margin-left: auto;
+}
+
+.en-sheet {
+  flex: 0 1 240px;
+  min-width: 160px;
+}
+
+.en-currency {
+  min-width: 112px;
+}
+
+.en-strip {
+  flex-wrap: nowrap;
+}
+
+.en-strip__chips {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1);
+  align-items: center;
+  min-width: 0;
+}
+
+.en-strip__step {
+  display: inline-flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+}
+
+.en-strip__sep,
+.en-strip__leaf {
+  color: var(--text-400);
+  font-size: var(--ds-fs-label);
+}
+
+.en-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-2);
+  border: 1px solid var(--hairline);
+  background: var(--stage-800);
+}
+
+.en-drawer__row {
+  display: flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+  min-height: var(--ds-control-h-sm);
+}
+
+.en-drawer__num {
+  width: 16px;
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  text-align: right;
+}
+
+.en-drawer__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: var(--ds-space-1);
+  color: var(--text-200);
+  font-size: var(--ds-fs-label);
+}
+
+.en-drawer__foot {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: center;
+  margin-top: var(--ds-space-1);
+  padding-top: var(--ds-space-2);
+  border-top: 1px solid var(--hairline);
+}
+
+/* The cost range while Display is Costs: lowest, the ramp, highest. */
+.en-legend {
+  display: inline-flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+  color: var(--text-300);
+  font-size: var(--ds-fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.en-legend__bar {
+  width: 72px;
+  height: 8px;
+  border-radius: var(--ds-radius-btn);
+}
+
+.en-searchrow,
+.en-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+  align-items: center;
+  padding: var(--ds-space-2) 0;
+}
+
+.en-tools {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.en-searchrow > .ds-search {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.en-steps {
+  display: flex;
+  gap: var(--ds-space-1);
+  align-items: center;
+}
+
+.en-push {
+  margin-left: auto;
+}
+
+.en-spacer {
+  flex: 1 1 auto;
+}
+
+/* --- the trees (VirtualTree) -------------------------------------------- */
+
+.en-treewrap {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 160px;
+  margin-bottom: var(--ds-space-3);
+}
+
+/* The scroll box: header and rows scroll together, both ways. */
+.en-vt {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  padding: 6px 10px 10px;
-  font-size: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--stage-900);
 }
 
-.tree-indent {
-  margin-left: 12px;
+.en-vt__canvas {
+  position: relative;
 }
 
-.tree-group {
+.en-vt__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--hairline-soft);
+  background: var(--stage-800);
+}
+
+.en-vt__body {
+  position: relative;
+}
+
+.en-vt__rows {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+}
+
+/* A row: the DS tree item at a fixed height. The depth indent is the toggle's
+   (DS interactive trees), so the row itself has no left padding. */
+.en-row.ds-tree__item {
+  box-sizing: border-box;
+  height: var(--en-row-h);
+  padding: 0 var(--ds-col-pad) 0 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-100) 3%, transparent);
+}
+
+.en-row--head.ds-tree__item {
+  border-bottom: 0;
+  cursor: default;
+}
+
+.en-row--head.ds-tree__item:hover {
+  background: transparent;
+}
+
+/* The lead: the include box and the name column (toggle, swatch, label). Its
+   minimum width (set per tree) is what makes a narrow panel scroll sideways
+   instead of crushing it, and it stays pinned at the left while the value
+   columns scroll under it. Opaque, so the scrolled cells do not show through;
+   the row's state tint is repeated on it (::before, under its content). */
+.en-lead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex: 1 0 var(--en-lead-min, 220px);
+  gap: var(--ds-tree-gap);
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  background: var(--stage-900);
+}
+
+.en-lead::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--en-tint, transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.en-row.ds-rowtint {
+  --en-tint: color-mix(in srgb, var(--ds-rowtint) var(--ds-rowtint-a, 12%), transparent);
+}
+
+.en-row:hover,
+.en-row.ds-sel {
+  --en-tint: var(--vim-cyan-tint);
+}
+
+.en-row.ds-sel > .en-lead {
+  box-shadow: inset 2px 0 0 var(--vim-cyan);
+}
+
+.en-row--head > .en-lead {
+  --en-tint: transparent;
+  background: var(--stage-800);
+}
+
+.en-name {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Header labels: the DS column-header face. */
+.en-th {
+  overflow: hidden;
+  color: var(--text-300);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: var(--en-track-header);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The NAME label sits over a depth-0 row's label. */
+.en-name.en-th {
+  display: block;
+  align-self: center;
+  padding-left: var(--en-label-indent);
+}
+
+.en-c-count { width: var(--en-c-count); }
+.en-c-amount { width: var(--en-c-amount); }
+.en-c-qty { width: var(--en-c-qty); }
+.en-c-wp { width: var(--en-c-wp); }
+.en-c-code { width: var(--en-c-code); }
+.en-c-extra { width: var(--en-c-extra); }
+.en-c-note { width: var(--en-c-note); }
+.en-c-basis { width: var(--en-c-basis); }
+.en-c-unit { width: var(--en-c-unit); }
+.en-c-price { width: var(--en-c-price); }
+.en-c-days { width: var(--en-c-days); }
+.en-c-rate { width: var(--en-c-rate); }
+.en-c-mat { width: var(--en-c-mat); }
+.en-c-lab { width: var(--en-c-lab); }
+
+/* A cell that holds a control: the control fills it; the DS column inset
+   stays on the right, as for the figures. */
+.en-ctl.ds-tree__cell {
   display: flex;
   align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 3px;
-  background: none;
+  overflow: visible;
   text-align: left;
 }
 
-.tree-group:hover {
-  background: var(--bg);
-}
-
-.tree-name {
+.en-th.en-ctl {
+  display: block;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.chevron {
-  flex: 0 0 12px;
-  color: var(--muted);
-}
-
-[data-testid='tree-element'] {
-  cursor: pointer;
-  border-radius: 3px;
-}
-
-[data-testid='tree-element']:hover {
-  background: var(--bg);
-}
-
-[data-testid='tree-element'][aria-selected='true'] {
-  color: #fff;
-  background: var(--accent);
-}
-
-.tree-leaf {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 4px 2px 16px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tree-element-label {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border: 1px solid rgb(0 0 0 / 25%);
-  border-radius: 50%;
-}
-
-/* --- label panel -------------------------------------------------------- */
-
-.label-panel {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 48%;
-  padding: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.label-list,
-.labelled-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.label-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.label-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.label-item button {
-  padding: 2px 8px;
-  font-size: 12px;
-}
-
-button.icon {
-  padding: 2px 7px;
-  line-height: 1;
-}
-
-.swatch {
-  flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-  border: 1px solid rgb(0 0 0 / 25%);
-  border-radius: 3px;
-}
-
-.small-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.label-new {
-  display: flex;
-  gap: 6px;
-}
-
-.label-new input[type='text'] {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-}
-
-.label-new input[type='color'] {
-  width: 32px;
-  padding: 1px;
-}
-
-.label-status {
-  margin: 0;
-  color: var(--muted);
-}
-
-.label-status[data-state='error'] {
-  color: var(--error);
-}
-
-.label-panel p {
-  margin: 0;
-}
-
-/* The labelled list is the only part that grows, so it gets the scroll. */
-.labelled-list {
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-  font-size: 12px;
-}
-
-.labelled-element {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+/* Inline selects and fields in a row: one height, so a row's controls line up. */
+.en-row .ds-select--inline,
+.en-row .ds-input--inline {
+  box-sizing: border-box;
   width: 100%;
+  min-width: 0;
+  height: var(--en-cell-h);
+  padding: 0;
+  font-size: var(--ds-fs-label);
+}
+
+.en-row .ds-select--inline .ds-select__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* The trigger is a <button>, which centres its text. */
+  text-align: left;
+}
+
+.en-cellnum {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The ElementId before an element's name. */
+.en-eid {
+  margin-right: var(--ds-space-2);
+  color: var(--text-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.en-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The tree's own empty state sits where the rows would be, inside the tree's
+   frame (no second, dashed one). */
+.en-vt .ds-empty {
+  padding: var(--ds-space-5) var(--ds-space-3);
+  border: 0;
+}
+
+/* --- dialogs ------------------------------------------------------------ */
+
+.en-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+
+.en-picklist {
+  height: 320px;
+}
+
+.en-picklist--short {
+  height: 160px;
+}
+
+/* A two-column form: the grid spaces the rows, so the fields' own "+ field"
+   top margin goes. */
+.en-form2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ds-space-3);
+  align-items: start;
+}
+
+.en-form2 > .ds-formfield {
+  margin-top: 0;
+}
+
+.en-form2__wide {
+  grid-column: 1 / -1;
+}
+
+/* --- footer: [ markups | TOTAL ] ---------------------------------------- */
+
+.en-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-4);
+  align-items: flex-start;
+  padding: var(--ds-space-3);
+  background: var(--stage-800);
+}
+
+.en-markups {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  min-width: 0;
+}
+
+.en-mrow {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) 96px 100px var(--ds-control-h-sm);
+  gap: var(--ds-space-2);
+  align-items: center;
+}
+
+.en-mrow--head {
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: var(--en-track-eyebrow);
+  text-transform: uppercase;
+}
+
+.en-mrow .ds-number {
+  width: 100%;
+}
+
+.en-mrow .ds-number__input {
+  flex: 1 1 auto;
+  width: 0;
+  text-align: right;
+}
+
+.en-num {
+  color: var(--text-100);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.en-mrow--head > .en-num {
+  color: var(--text-400);
+}
+
+.en-total {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.en-total__label {
+  color: var(--vim-cyan);
+  font-size: var(--ds-fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: var(--en-track-eyebrow);
+  text-transform: uppercase;
+}
+
+/* The DS gold (the control bar's gold glow uses it too). */
+.en-total__value {
+  color: var(--health-amber);
+  font-size: var(--ds-fs-hero);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.en-total__sub {
+  color: var(--text-300);
+  font-size: var(--ds-fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.en-total__sub--warn {
+  color: var(--warn);
+}
+
+/* --- Cost Details ------------------------------------------------------- */
+
+.ed-pager {
+  display: flex;
+  flex: none;
+  gap: var(--ds-space-1);
+  align-items: center;
+  padding-bottom: var(--ds-space-2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ed-pagesel {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ed-facts,
+.ed-cost,
+.ed-fields {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+.ed-cost,
+.ed-fields {
+  padding-top: var(--ds-space-2);
+  border-top: 1px solid var(--hairline);
+}
+
+.ed-fields {
+  gap: var(--ds-space-2);
+}
+
+.ed-line {
+  display: flex;
+  gap: var(--ds-space-2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.ed-fields .ed-line {
+  align-items: center;
+}
+
+.ed-k {
+  flex: 0 0 104px;
+  color: var(--text-400);
+  font-family: var(--font-mono);
+  font-size: var(--ds-fs-eyebrow);
+  letter-spacing: var(--en-track-header);
+  text-transform: uppercase;
+}
+
+.ed-v {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
+  color: var(--text-100);
+  font-size: var(--ds-fs-label);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ed-v--num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ed-v--total {
+  color: var(--health-amber);
+  font-weight: 600;
+}
+
+.ed-varies {
+  color: var(--text-400);
+  font-style: italic;
+}
+
+.ed-warn {
+  color: var(--warn);
+  font-size: var(--ds-fs-label);
+}
+
+.ed-control {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ed-note {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+
+/* In this column the label's 104px basis would be its HEIGHT: it keeps its own. */
+.ed-note > .ed-k {
+  flex: 0 0 auto;
 }

@@ -28,12 +28,6 @@ export const storageKeys = {
   pkce: 'vimSatellite.pkce',
 } as const
 
-/** Project custom-data namespaces this app owns. */
-export const namespaces = {
-  palette: 'satellite.palette',
-  labels: 'satellite.labels',
-} as const
-
 export type EntraConfig = {
   tenantId: string
   clientId: string

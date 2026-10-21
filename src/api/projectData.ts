@@ -1,8 +1,14 @@
 /**
  * The project custom data store: namespace + key -> arbitrary JSON.
  *
- * This is where the satellite keeps its own state (the label palette and the
- * per-element assignments) without any server-side code of its own.
+ * This is where the satellite keeps its own state (the estimate: cost codes,
+ * work packages, sheets and per-element assignments, see estimate/store.ts)
+ * without any server-side code of its own.
+ *
+ * Every call here that is safe to send twice opts in to http.ts's retry of
+ * transient failures (`retry: true`): reads, batch upserts, batch deletes,
+ * namespace deletes, and a single PUT without a precondition. A conditional
+ * PUT does not: its caller decides (see updateSheet in estimate/store.ts).
  */
 import { apiFetch, apiRequest, jsonBody, path } from './http'
 import type { DataEntry } from './types'
@@ -36,6 +42,7 @@ export async function listEntries<T>(
 ): Promise<DataEntry<T>[]> {
   const raw = await apiFetch<{ key: string; value: unknown }[]>(
     namespacePath(projectId, namespace),
+    { retry: true },
   )
   return raw.map((entry) => ({ key: entry.key, value: asValue<T>(entry.value) }))
 }
@@ -46,7 +53,10 @@ export async function getEntry<T>(
   namespace: string,
   key: string,
 ): Promise<{ value: T; etag?: string } | null> {
-  const response = await apiRequest(keyPath(projectId, namespace, key), { allowStatus: [404] })
+  const response = await apiRequest(keyPath(projectId, namespace, key), {
+    allowStatus: [404],
+    retry: true,
+  })
   if (response.status === 404) return null
   const body = (await response.json()) as { value?: unknown }
   return {
@@ -64,8 +74,10 @@ export type Precondition = {
 }
 
 /**
- * Writes one entry. Without a precondition this is last-write-wins; with one the
- * server answers 412 (an ApiError with status 412) when it does not hold.
+ * Writes one entry. Without a precondition this is last-write-wins, and safe to
+ * retry; with one the server answers 412 (an ApiError with status 412) when it
+ * does not hold, and a failure is not retried: the first attempt may have
+ * landed, so a second one would fail its own precondition.
  */
 export async function putEntry(
   projectId: string,
@@ -82,10 +94,11 @@ export async function putEntry(
     ...init,
     method: 'PUT',
     headers,
+    retry: !precondition.ifMatch && !precondition.ifNoneMatch,
   })
 }
 
-/** Batch upsert. Used when one user action labels many elements at once. */
+/** Batch upsert. Used when one user action changes many elements at once. Idempotent, so retried. */
 export async function putEntries<T>(
   projectId: string,
   namespace: string,
@@ -94,10 +107,14 @@ export async function putEntries<T>(
   return apiFetch<{ created: number; updated: number }>(namespacePath(projectId, namespace), {
     ...jsonBody(entries),
     method: 'PUT',
+    retry: true,
   })
 }
 
-/** Batch delete, via the POST sub-route (DELETE cannot carry a body reliably). */
+/**
+ * Batch delete, via the POST sub-route (DELETE cannot carry a body reliably).
+ * A POST, but idempotent (a key already gone is skipped), so retried.
+ */
 export async function deleteEntries(
   projectId: string,
   namespace: string,
@@ -105,6 +122,21 @@ export async function deleteEntries(
 ): Promise<{ deleted: number }> {
   return apiFetch<{ deleted: number }>(
     `/${path('project', projectId, 'data', namespace, 'delete')}`,
-    { ...jsonBody(keys), method: 'POST' },
+    { ...jsonBody(keys), method: 'POST', retry: true },
   )
+}
+
+/**
+ * Deletes a whole namespace and every entry in it, in one call.
+ *
+ * A 404 counts as done: the goal is "this namespace holds nothing", and a
+ * namespace that never had an entry (or that someone else already deleted)
+ * meets it. That also makes a retry safe after a first attempt that landed.
+ */
+export async function deleteNamespace(projectId: string, namespace: string): Promise<void> {
+  await apiRequest(namespacePath(projectId, namespace), {
+    method: 'DELETE',
+    allowStatus: [404],
+    retry: true,
+  })
 }

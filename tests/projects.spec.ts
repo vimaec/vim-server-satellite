@@ -70,11 +70,10 @@ test.describe('projects', () => {
     await page.goto('/')
     await page.locator('[data-testid="project-item"][data-project-id="p-tiny"]').click()
 
-    await expect(page.getByTestId('element-tree')).toBeVisible()
-    await expect(page.getByTestId('label-panel')).toBeVisible()
+    await expect(page.getByTestId('estimate-panel')).toBeVisible()
     await expect(page.getByTestId('viewer-pane')).toBeVisible()
 
-    // Waiting for the whole snapshot to arrive is viewer-labels.spec.ts's job;
+    // Waiting for the whole snapshot to arrive is estimate.spec.ts's job;
     // here the load only has to start.
     await expect(page.getByTestId('viewer-status')).toHaveAttribute(
       'data-state',
@@ -105,7 +104,7 @@ test.describe('projects', () => {
     await expect(page.getByTestId('viewer-status')).toContainText('Opening the project')
     // "no VIM" would be a lie: the app does not know yet.
     await expect(page.getByTestId('snapshot-tag')).toHaveText('…')
-    await expect(page.getByTestId('element-tree')).toContainText('Opening the project')
+    await expect(page.getByTestId('estimate-tree')).toContainText('Opening the project')
 
     await expect(page.getByTestId('snapshot-tag')).toHaveText('v3')
   })

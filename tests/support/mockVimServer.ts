@@ -38,7 +38,8 @@ export type MockBlob = {
 export type MockProject = {
   id: string
   name: string
-  role: 'Viewer' | 'Manager' | 'Admin'
+  /** 'Viewer', 'Manager' or 'Admin' on the real server; a test may hand out a role the app does not know. */
+  role: string
   latestVim: MockBlob | null
 }
 
@@ -64,6 +65,26 @@ export type RecordedWrite =
   | { kind: 'put-batch'; namespace: string; entries: { key: string; value: unknown }[] }
   | { kind: 'delete'; namespace: string; keys: string[] }
 
+/**
+ * How `failRead` / `failWrite` fail a request: an HTTP status (e.g. 503), or
+ * 'network' to abort it with no answer at all. The page's fetch() then rejects
+ * with a TypeError, which is what the real server's sign-in redirect under
+ * load looks like in a browser (a CORS error).
+ */
+export type MockFailure = number | 'network'
+
+/** A data-store read as `failRead` and `holdRead` see it: a list (no key) or one entry. */
+export type PendingRead = { namespace: string; key?: string }
+
+/** A data-store write as `failWrite` sees it, before the mock acts on it. */
+export type PendingWrite = {
+  /** `put` / `delete` one entry, `put-batch` / `delete-batch` many, `delete-namespace` all of them. */
+  kind: 'put' | 'delete' | 'put-batch' | 'delete-batch' | 'delete-namespace'
+  namespace: string
+  /** The entry key, for `put` and `delete`. */
+  key?: string
+}
+
 export type MockOptions = {
   orgs?: MockOrg[]
   /** Seed the project data store: namespace -> key -> value. */
@@ -77,18 +98,55 @@ export type MockOptions = {
    * another writer between the app's read and its write.
    */
   beforeEntryWrite?: (write: { namespace: string; key: string }, store: MockStore) => void
+  /**
+   * Called before every data-store write, retries included. A failure returned
+   * (e.g. 500, or 'network') answers the write with it instead: nothing is
+   * stored and nothing is recorded in `writes`. Undefined lets the write through.
+   */
+  failWrite?: (write: PendingWrite) => MockFailure | undefined
+  /**
+   * Called before every data-store read, retries included. A failure returned
+   * (e.g. 500, or 'network') answers the read with it instead. Undefined lets
+   * the read through.
+   */
+  failRead?: (read: PendingRead) => MockFailure | undefined
+  /**
+   * Called before a data-store write that `failWrite` let through is carried
+   * out. A promise returned holds the write until it settles: a server that
+   * takes its time, so that requests the page sends together overlap.
+   */
+  holdWrite?: (write: PendingWrite) => Promise<void> | undefined
+  /**
+   * Called once a data-store read is answered from the store, before the reply
+   * is sent. A promise returned holds the reply until it settles, and the reply
+   * still carries the data of when the request came in: a read that arrives
+   * late with data that is out of date by then.
+   */
+  holdRead?: (read: PendingRead) => Promise<void> | undefined
 }
 
 export type MockHandle = {
   orgs: MockOrg[]
   store: MockStore
   writes: RecordedWrite[]
-  /** "GET /org", "PUT /project/p-tiny/data/satellite.labels/x", … in order. */
+  /** "GET /org", "PUT /project/p-tiny/data/estimate.sheets/sheet-1", … in order. */
   calls: string[]
   /** Flip the 401 switch after the page has signed in. */
   setUnauthorized: (value: boolean) => void
   entry: (namespace: string, key: string) => unknown
+  /**
+   * Data-store requests being answered right now (`now`), and the most at
+   * once (`peak`) since `resetPeaks()`: per namespace, and over all
+   * namespaces under ALL_DATA. A request counts from its arrival at the mock
+   * to its reply, refused ones included.
+   */
+  inFlight: Map<string, { now: number; peak: number }>
+  /** Starts a new peak count, from what is in flight now. */
+  resetPeaks: () => void
 }
+
+/** The `inFlight` key that counts every data-store request. */
+export const ALL_DATA = '*'
 
 const BLOB_TINY: MockBlob = {
   id: '9f1d4a52-0000-4000-8000-000000000001',
@@ -164,6 +222,10 @@ export async function installMockVimServer(
       unauthorized = value
     },
     entry: (namespace, key) => store.get(namespace)?.get(key)?.value,
+    inFlight: new Map(),
+    resetPeaks: () => {
+      for (const count of handle.inFlight.values()) count.peak = count.now
+    },
   }
   let unauthorized = options.unauthorized ?? false
 
@@ -174,6 +236,55 @@ export async function installMockVimServer(
       store.set(namespace, found)
     }
     return found
+  }
+
+  /** Fails a request as `failRead` / `failWrite` asked. */
+  const failWith = async (route: Route, failure: MockFailure, title: string, detail: string): Promise<void> => {
+    if (failure === 'network') await route.abort('failed')
+    else await route.fulfill(problem(failure, title, detail))
+  }
+
+  /** Answers a read `failRead` wants to fail; true when it did. */
+  const readRefused = async (route: Route, read: PendingRead): Promise<boolean> => {
+    const failure = options.failRead?.(read)
+    if (failure === undefined) return false
+    await failWith(route, failure, 'Read refused', `The mock refused a read of ${read.namespace}.`)
+    return true
+  }
+
+  /** Sends a read's reply, after `holdRead` lets it go. */
+  const answerRead = async (route: Route, read: PendingRead, reply: Parameters<Route['fulfill']>[0]): Promise<void> => {
+    await options.holdRead?.(read)
+    await route.fulfill(reply)
+  }
+
+  /** Answers a write `failWrite` wants to fail; true when it did. Else holds it as `holdWrite` asks. */
+  const refused = async (route: Route, write: PendingWrite): Promise<boolean> => {
+    const failure = options.failWrite?.(write)
+    if (failure === undefined) {
+      await options.holdWrite?.(write)
+      return false
+    }
+    await failWith(route, failure, 'Write refused', `The mock refused ${write.kind} on ${write.namespace}.`)
+    return true
+  }
+
+  /** Counts a data-store request in `inFlight` while `answer` runs. */
+  const counted = async (namespace: string, answer: () => Promise<void>): Promise<void> => {
+    const counts = [ALL_DATA, namespace].map((key) => {
+      let count = handle.inFlight.get(key)
+      if (!count) {
+        count = { now: 0, peak: 0 }
+        handle.inFlight.set(key, count)
+      }
+      return count
+    })
+    for (const count of counts) count.peak = Math.max(count.peak, ++count.now)
+    try {
+      await answer()
+    } finally {
+      for (const count of counts) count.now--
+    }
   }
 
   const findProject = (id: string): { org: MockOrg; project: MockProject } | undefined => {
@@ -256,7 +367,13 @@ export async function installMockVimServer(
         await route.fulfill(problem(404, 'Not Found', 'No such project.'))
         return
       }
-      await handleProjectRoute(route, method, projectRoute[2] ?? '', found, url)
+      const rest = projectRoute[2] ?? ''
+      const data = /^\/data\/([^/]+)/.exec(rest)
+      if (data) {
+        await counted(decodeURIComponent(data[1]), () => handleProjectRoute(route, method, rest, found, url))
+      } else {
+        await handleProjectRoute(route, method, rest, found, url)
+      }
       return
     }
 
@@ -325,18 +442,18 @@ export async function installMockVimServer(
     if (batch) {
       const namespace = decodeURIComponent(batch[1])
       if (method === 'GET') {
+        if (await readRefused(route, { namespace })) return
         // A list carries no ETags: the real server sends them only for a
         // single-entry read, which is the only read that can be written back.
         const entries = [...bucket(namespace)].map(([key, item]) => ({
           key,
           value: item.value,
         }))
-        await route.fulfill(
-          json(entries, 200, { 'X-Total-Count': String(entries.length) }),
-        )
+        await answerRead(route, { namespace }, json(entries, 200, { 'X-Total-Count': String(entries.length) }))
         return
       }
       if (method === 'PUT') {
+        if (await refused(route, { kind: 'put-batch', namespace })) return
         const body = route.request().postDataJSON() as unknown
         const entries = Array.isArray(body) ? (body as { key: string; value: unknown }[]) : []
         let created = 0
@@ -355,6 +472,7 @@ export async function installMockVimServer(
         return
       }
       if (method === 'DELETE') {
+        if (await refused(route, { kind: 'delete-namespace', namespace })) return
         store.delete(namespace)
         handle.writes.push({ kind: 'delete', namespace, keys: ['*'] })
         await route.fulfill({ status: 204, body: '' })
@@ -365,6 +483,7 @@ export async function installMockVimServer(
     const batchDelete = /^\/data\/([^/]+)\/delete$/.exec(rest)
     if (batchDelete && method === 'POST') {
       const namespace = decodeURIComponent(batchDelete[1])
+      if (await refused(route, { kind: 'delete-batch', namespace })) return
       const body = route.request().postDataJSON() as unknown
       const keys = Array.isArray(body) ? (body as string[]) : []
       let deleted = 0
@@ -380,12 +499,15 @@ export async function installMockVimServer(
       const key = decodeURIComponent(single[2])
 
       if (method === 'GET') {
+        if (await readRefused(route, { namespace, key })) return
         const existing = bucket(namespace).get(key)
         if (!existing) {
-          await route.fulfill(problem(404, 'Not Found', 'No such key.'))
+          await answerRead(route, { namespace, key }, problem(404, 'Not Found', 'No such key.'))
           return
         }
-        await route.fulfill(
+        await answerRead(
+          route,
+          { namespace, key },
           json({ key, value: existing.value }, 200, {
             ETag: `"${existing.version}"`,
             'Access-Control-Expose-Headers': 'ETag, X-Total-Count',
@@ -394,6 +516,7 @@ export async function installMockVimServer(
         return
       }
       if (method === 'PUT') {
+        if (await refused(route, { kind: 'put', namespace, key })) return
         options.beforeEntryWrite?.({ namespace, key }, store)
         const existing = bucket(namespace).get(key)
         const ifMatch = await route.request().headerValue('if-match')
@@ -422,6 +545,7 @@ export async function installMockVimServer(
         return
       }
       if (method === 'DELETE') {
+        if (await refused(route, { kind: 'delete', namespace, key })) return
         bucket(namespace).delete(key)
         handle.writes.push({ kind: 'delete', namespace, keys: [key] })
         await route.fulfill({ status: 204, body: '' })

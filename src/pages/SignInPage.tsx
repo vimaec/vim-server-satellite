@@ -1,5 +1,6 @@
 import { useAuth } from '../auth/AuthProvider'
 import { serverUrl } from '../config'
+import { Banner, Button, Card, Label } from '../ds'
 
 /**
  * One way in: Microsoft Entra ID. The button starts the PKCE redirect, and any
@@ -10,25 +11,26 @@ export function SignInPage(): JSX.Element {
 
   return (
     <main className="centered" data-testid="signin-page">
-      <section className="card">
-        <h1>VIM Server Satellite</h1>
-        <p className="muted">
-          A sample app that opens a VIM Server project, shows its model and stores labels back on
-          the project.
-        </p>
+      <Card className="signin-card" title="VIM Server Satellite" titleAs="h1">
+        <Label as="p" variant="body">
+          A sample app that opens a VIM Server project, shows its model, and keeps a cost estimate of
+          its elements in the project's data store.
+        </Label>
 
-        <button type="button" className="primary" data-testid="signin-microsoft" onClick={auth.signIn}>
+        <Button variant="primary" data-testid="signin-microsoft" onClick={auth.signIn}>
           Sign in with Microsoft
-        </button>
+        </Button>
 
         {auth.error ? (
-          <p className="error" role="alert" data-testid="signin-error">
+          <Banner tone="bad" role="alert" data-testid="signin-error">
             {auth.error}
-          </p>
+          </Banner>
         ) : null}
 
-        <p className="muted small">Server: {serverUrl}</p>
-      </section>
+        <Label as="p" variant="dim">
+          Server: {serverUrl}
+        </Label>
+      </Card>
     </main>
   )
 }

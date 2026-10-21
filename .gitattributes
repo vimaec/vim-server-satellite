@@ -2,3 +2,6 @@
 *.vim binary
 *.png binary
 *.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
