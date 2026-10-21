@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as VIM from 'vim-web'
-import { setDebugViewerBackground } from '../debug'
+import { setDebugViewerBackground, setDebugViewerGhost } from '../debug'
 
 type ViewerApi = VIM.React.Webgl.ViewerApi
 type IWebglVim = VIM.Core.Webgl.IWebglVim
@@ -32,8 +32,36 @@ const VIEWER_BACKGROUND = '#0b121c'
  * almost black.
  */
 function rendererBackground(): VIM.THREE.Color {
-  return new VIM.THREE.Color().setStyle(VIEWER_BACKGROUND, VIM.THREE.LinearSRGBColorSpace)
+  return rendererColor(VIEWER_BACKGROUND)
 }
+
+/**
+ * A `#rrggbb` for a colour vim-web writes to the screen as it holds it: its
+ * sRGB values kept as they are (tagged linear, so three.js does not convert).
+ */
+function rendererColor(hex: string): VIM.THREE.Color {
+  return new VIM.THREE.Color().setStyle(hex, VIM.THREE.LinearSRGBColorSpace)
+}
+
+/**
+ * The fill of ghosted elements: the DS light text grey (`--text-200`), so a
+ * ghost reads as a pale veil on VIEWER_BACKGROUND, not as vim-web's default
+ * near-black (#0e0e0e). vim-web's ghost shader writes this colour with no
+ * linear-to-sRGB step, as the background, so it is given the same way
+ * (rendererColor). Ghosts are the elements vim-web draws as hidden while
+ * "Show Ghost" is on (its default): the estimate's excluded elements, and what
+ * the control bar's Isolate / Hide Selection leave out.
+ */
+const GHOST_COLOR = '#d6dce6'
+
+/**
+ * The ghost fill's opacity, low so the ghosts stay behind what is shown: one
+ * ghost face over the background comes out #1f2630, two #313842, and so on,
+ * which is what draws the shape. vim-web's default is 7/255 (about 0.03). Its
+ * isolation settings panel can change it for the session; with local storage
+ * off (below) that change is not kept, so every page load starts from this.
+ */
+const GHOST_OPACITY = 0.1
 
 /** The pane's own paint, for the moments before the canvas draws. */
 const PANE_STYLE = { background: VIEWER_BACKGROUND } as const
@@ -225,7 +253,10 @@ export function ViewerPane({
         isolation: { autoIsolate: false },
         capacity: { canReadLocalStorage: false },
       },
-      { background: { color: rendererBackground() } },
+      {
+        background: { color: rendererBackground() },
+        materials: { ghost: { color: rendererColor(GHOST_COLOR), opacity: GHOST_OPACITY } },
+      },
     )
     if (!hostRef.current) {
       // Unmounted while createViewer was awaiting.
@@ -239,6 +270,11 @@ export function ViewerPane({
       return background instanceof VIM.THREE.Color
         ? `#${background.getHexString(VIM.THREE.LinearSRGBColorSpace)}`
         : null
+    })
+    setDebugViewerGhost(() => {
+      const { ghostColor, ghostOpacity } = viewer.core.materials
+      // Read back as given (see rendererColor).
+      return { color: `#${ghostColor.getHexString(VIM.THREE.LinearSRGBColorSpace)}`, opacity: ghostOpacity }
     })
 
     const unsubSelection = viewer.core.selection.onSelectionChanged.sub(() => {
@@ -426,6 +462,7 @@ export function ViewerPane({
       unsubRef.current?.()
       unsubRef.current = undefined
       setDebugViewerBackground(null)
+      setDebugViewerGhost(null)
       viewerRef.current?.dispose()
       viewerRef.current = undefined
       vimRef.current = undefined

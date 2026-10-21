@@ -65,6 +65,14 @@ export type RecordedWrite =
   | { kind: 'put-batch'; namespace: string; entries: { key: string; value: unknown }[] }
   | { kind: 'delete'; namespace: string; keys: string[] }
 
+/**
+ * How `failRead` / `failWrite` fail a request: an HTTP status (e.g. 503), or
+ * 'network' to abort it with no answer at all. The page's fetch() then rejects
+ * with a TypeError, which is what the real server's sign-in redirect under
+ * load looks like in a browser (a CORS error).
+ */
+export type MockFailure = number | 'network'
+
 /** A data-store read as `failRead` and `holdRead` see it: a list (no key) or one entry. */
 export type PendingRead = { namespace: string; key?: string }
 
@@ -91,16 +99,23 @@ export type MockOptions = {
    */
   beforeEntryWrite?: (write: { namespace: string; key: string }, store: MockStore) => void
   /**
-   * Called before every data-store write. A status code returned (e.g. 500)
-   * answers the write with that error instead: nothing is stored and nothing
-   * is recorded in `writes`. Undefined lets the write through.
+   * Called before every data-store write, retries included. A failure returned
+   * (e.g. 500, or 'network') answers the write with it instead: nothing is
+   * stored and nothing is recorded in `writes`. Undefined lets the write through.
    */
-  failWrite?: (write: PendingWrite) => number | undefined
+  failWrite?: (write: PendingWrite) => MockFailure | undefined
   /**
-   * Called before every data-store read. A status code returned (e.g. 500)
-   * answers the read with that error instead. Undefined lets the read through.
+   * Called before every data-store read, retries included. A failure returned
+   * (e.g. 500, or 'network') answers the read with it instead. Undefined lets
+   * the read through.
    */
-  failRead?: (read: PendingRead) => number | undefined
+  failRead?: (read: PendingRead) => MockFailure | undefined
+  /**
+   * Called before a data-store write that `failWrite` let through is carried
+   * out. A promise returned holds the write until it settles: a server that
+   * takes its time, so that requests the page sends together overlap.
+   */
+  holdWrite?: (write: PendingWrite) => Promise<void> | undefined
   /**
    * Called once a data-store read is answered from the store, before the reply
    * is sent. A promise returned holds the reply until it settles, and the reply
@@ -119,7 +134,19 @@ export type MockHandle = {
   /** Flip the 401 switch after the page has signed in. */
   setUnauthorized: (value: boolean) => void
   entry: (namespace: string, key: string) => unknown
+  /**
+   * Data-store requests being answered right now (`now`), and the most at
+   * once (`peak`) since `resetPeaks()`: per namespace, and over all
+   * namespaces under ALL_DATA. A request counts from its arrival at the mock
+   * to its reply, refused ones included.
+   */
+  inFlight: Map<string, { now: number; peak: number }>
+  /** Starts a new peak count, from what is in flight now. */
+  resetPeaks: () => void
 }
+
+/** The `inFlight` key that counts every data-store request. */
+export const ALL_DATA = '*'
 
 const BLOB_TINY: MockBlob = {
   id: '9f1d4a52-0000-4000-8000-000000000001',
@@ -195,6 +222,10 @@ export async function installMockVimServer(
       unauthorized = value
     },
     entry: (namespace, key) => store.get(namespace)?.get(key)?.value,
+    inFlight: new Map(),
+    resetPeaks: () => {
+      for (const count of handle.inFlight.values()) count.peak = count.now
+    },
   }
   let unauthorized = options.unauthorized ?? false
 
@@ -207,11 +238,17 @@ export async function installMockVimServer(
     return found
   }
 
+  /** Fails a request as `failRead` / `failWrite` asked. */
+  const failWith = async (route: Route, failure: MockFailure, title: string, detail: string): Promise<void> => {
+    if (failure === 'network') await route.abort('failed')
+    else await route.fulfill(problem(failure, title, detail))
+  }
+
   /** Answers a read `failRead` wants to fail; true when it did. */
   const readRefused = async (route: Route, read: PendingRead): Promise<boolean> => {
-    const status = options.failRead?.(read)
-    if (status === undefined) return false
-    await route.fulfill(problem(status, 'Read refused', `The mock refused a read of ${read.namespace}.`))
+    const failure = options.failRead?.(read)
+    if (failure === undefined) return false
+    await failWith(route, failure, 'Read refused', `The mock refused a read of ${read.namespace}.`)
     return true
   }
 
@@ -221,12 +258,33 @@ export async function installMockVimServer(
     await route.fulfill(reply)
   }
 
-  /** Answers a write `failWrite` wants to fail; true when it did. */
+  /** Answers a write `failWrite` wants to fail; true when it did. Else holds it as `holdWrite` asks. */
   const refused = async (route: Route, write: PendingWrite): Promise<boolean> => {
-    const status = options.failWrite?.(write)
-    if (status === undefined) return false
-    await route.fulfill(problem(status, 'Write refused', `The mock refused ${write.kind} on ${write.namespace}.`))
+    const failure = options.failWrite?.(write)
+    if (failure === undefined) {
+      await options.holdWrite?.(write)
+      return false
+    }
+    await failWith(route, failure, 'Write refused', `The mock refused ${write.kind} on ${write.namespace}.`)
     return true
+  }
+
+  /** Counts a data-store request in `inFlight` while `answer` runs. */
+  const counted = async (namespace: string, answer: () => Promise<void>): Promise<void> => {
+    const counts = [ALL_DATA, namespace].map((key) => {
+      let count = handle.inFlight.get(key)
+      if (!count) {
+        count = { now: 0, peak: 0 }
+        handle.inFlight.set(key, count)
+      }
+      return count
+    })
+    for (const count of counts) count.peak = Math.max(count.peak, ++count.now)
+    try {
+      await answer()
+    } finally {
+      for (const count of counts) count.now--
+    }
   }
 
   const findProject = (id: string): { org: MockOrg; project: MockProject } | undefined => {
@@ -309,7 +367,13 @@ export async function installMockVimServer(
         await route.fulfill(problem(404, 'Not Found', 'No such project.'))
         return
       }
-      await handleProjectRoute(route, method, projectRoute[2] ?? '', found, url)
+      const rest = projectRoute[2] ?? ''
+      const data = /^\/data\/([^/]+)/.exec(rest)
+      if (data) {
+        await counted(decodeURIComponent(data[1]), () => handleProjectRoute(route, method, rest, found, url))
+      } else {
+        await handleProjectRoute(route, method, rest, found, url)
+      }
       return
     }
 

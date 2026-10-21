@@ -13,8 +13,12 @@
  * Concurrency: a sheet document is shared and edited as a whole (its markups
  * list), so it is written read-modify-write under `If-Match`. Codes, work
  * packages and assignments are one entry per thing and last-write-wins.
+ *
+ * Load: batch requests go out at most WRITE_CONCURRENCY at a time, and http.ts
+ * retries the idempotent ones when the server is busy.
  */
-import { ApiError } from '../api/http'
+import { ApiError, isTransient } from '../api/http'
+import { mapLimit } from '../api/limit'
 import {
   deleteEntries,
   deleteNamespace,
@@ -55,7 +59,19 @@ export const DEFAULT_MARKUPS: Markup[] = [
 /** The server is asked to take at most this many entries per batch request. */
 const BATCH = 1000
 
-/** How many times a sheet write re-reads and re-applies after a 412. */
+/**
+ * At most this many batch requests of one change are in flight at once.
+ *
+ * Why so few: VIM Server answers a burst of concurrent batch requests with
+ * errors. Measured on the real server: of 48 batch deletes of 1000 keys sent
+ * at once, about 14 % came back as a 302 to the sign-in page (a CORS error in
+ * the browser) and 2 % as 500; at 1, 2 or 4 at once all 48 went through, and 2
+ * at once took 1.7 s for all of them. One bulk change on a big sheet (81,000
+ * entries) is dozens of batches.
+ */
+export const WRITE_CONCURRENCY = 2
+
+/** How many times a sheet write re-reads and re-applies after a 412 (or a write that did not land). */
 const SHEET_ATTEMPTS = 3
 
 export type StoredWorkPackage = Omit<WorkPackage, 'id'>
@@ -232,12 +248,20 @@ export async function createSheet(projectId: string, sheet: Sheet): Promise<bool
  * actually stored, write back under `If-Match`; a 412 means someone else got
  * in between, so the cycle runs again over their version. Returns the sheet
  * now on the server, which the caller should adopt.
+ *
+ * The conditional PUT is not retried blindly (see putEntry). When it fails
+ * with no answer or a transient status, the entry is read again to learn
+ * whether the write landed: the ETag has not moved, so it did not, and the
+ * cycle runs again; the entry holds what was written, so it did; anything else
+ * is somebody else's write, and the failure stands, as `mutate` is not
+ * necessarily safe to apply twice.
  */
 export async function updateSheet(
   projectId: string,
   sheetId: string,
   mutate: (current: Sheet) => Sheet,
 ): Promise<Sheet> {
+  let failure: ApiError | null = null
   for (let attempt = 0; attempt < SHEET_ATTEMPTS; attempt++) {
     const entry = await getEntry<unknown>(projectId, NAMESPACES.sheets, sheetId)
     if (!entry) throw new ApiError(404, 'The sheet is gone', 'Someone else deleted it.')
@@ -246,10 +270,22 @@ export async function updateSheet(
       await putEntry(projectId, NAMESPACES.sheets, sheetId, storedSheet(next), { ifMatch: entry.etag })
       return next
     } catch (cause: unknown) {
-      if (!(cause instanceof ApiError) || cause.status !== 412) throw cause
+      if (!(cause instanceof ApiError)) throw cause
+      failure = cause
+      if (cause.status === 412) continue
+      if (!isTransient(cause)) throw cause
+      const after = await getEntry<unknown>(projectId, NAMESPACES.sheets, sheetId)
+      if (after && sameStored(after.value, sheetId, next)) return next
+      if (!after || after.etag !== entry.etag) throw cause
     }
   }
+  if (failure && failure.status !== 412) throw failure
   throw new ApiError(412, 'Could not save the sheet', 'Someone else keeps editing it. Try again.')
+}
+
+/** Whether a stored sheet value says the same as `sheet`. */
+function sameStored(value: unknown, sheetId: string, sheet: Sheet): boolean {
+  return JSON.stringify(storedSheet(toSheet(sheetId, value))) === JSON.stringify(storedSheet(sheet))
 }
 
 /** Its assignments first, then the sheet entry: a sheet never points at data that is gone. */
@@ -266,6 +302,28 @@ function chunks<T>(items: T[]): T[][] {
   return out
 }
 
+/** A batch request, not sent yet. */
+type BatchRequest = () => Promise<unknown>
+
+/** The batch requests (upserts and deletes, chunked) that write one sheet's assignment changes. */
+function assignmentRequests(
+  projectId: string,
+  sheetId: string,
+  puts: { key: string; value: Assignment }[],
+  deletes: string[],
+): BatchRequest[] {
+  const namespace = sheetNamespace(sheetId)
+  return [
+    ...chunks(puts).map((part) => () => putEntries(projectId, namespace, part)),
+    ...chunks(deletes).map((part) => () => deleteEntries(projectId, namespace, part)),
+  ]
+}
+
+/** Sends batch requests, WRITE_CONCURRENCY at a time (in no set order: their keys do not overlap). */
+async function sendBatches(requests: BatchRequest[]): Promise<void> {
+  await mapLimit(requests, WRITE_CONCURRENCY, (request) => request())
+}
+
 /** One batch of assignment changes for one sheet: upserts and deletes, chunked. */
 export async function writeAssignments(
   projectId: string,
@@ -273,11 +331,7 @@ export async function writeAssignments(
   puts: { key: string; value: Assignment }[],
   deletes: string[],
 ): Promise<void> {
-  const namespace = sheetNamespace(sheetId)
-  await Promise.all([
-    ...chunks(puts).map((part) => putEntries(projectId, namespace, part)),
-    ...chunks(deletes).map((part) => deleteEntries(projectId, namespace, part)),
-  ])
+  await sendBatches(assignmentRequests(projectId, sheetId, puts, deletes))
 }
 
 /** Copies every assignment of one sheet into another (Duplicate). */
@@ -301,21 +355,22 @@ async function stripReference(
   id: string,
 ): Promise<void> {
   const sheets = await loadSheets(projectId)
-  await Promise.all(
-    sheets.map(async (sheet) => {
-      const current = await loadAssignments(projectId, sheet.id)
-      const puts: { key: string; value: Assignment }[] = []
-      const deletes: string[] = []
-      for (const [key, assignment] of current) {
-        if (assignment[field] !== id) continue
-        const next = { ...assignment }
-        delete next[field]
-        if (toAssignment(next)) puts.push({ key, value: next })
-        else deletes.push(key)
-      }
-      if (puts.length || deletes.length) await writeAssignments(projectId, sheet.id, puts, deletes)
-    }),
-  )
+  // Every sheet is read first, then all their writes share one pool: however
+  // many sheets there are, at most WRITE_CONCURRENCY requests are out at once.
+  const requests = await mapLimit(sheets, WRITE_CONCURRENCY, async (sheet) => {
+    const current = await loadAssignments(projectId, sheet.id)
+    const puts: { key: string; value: Assignment }[] = []
+    const deletes: string[] = []
+    for (const [key, assignment] of current) {
+      if (assignment[field] !== id) continue
+      const next = { ...assignment }
+      delete next[field]
+      if (toAssignment(next)) puts.push({ key, value: next })
+      else deletes.push(key)
+    }
+    return assignmentRequests(projectId, sheet.id, puts, deletes)
+  })
+  await sendBatches(requests.flat())
 }
 
 // ---- work packages and cost codes --------------------------------------------------------------

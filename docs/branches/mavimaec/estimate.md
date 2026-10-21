@@ -16,6 +16,9 @@
 - Add a "refresh" button next to the "Estimate" title that reloads the cost and estimation data from VIM Server.
 - Set the background color of the vim-web viewer to #0b121c.
 - Disable the axis widget in the top right of the 3D view.
+- Give ghosted elements a lighter color that reads well on the dark background.
+- Style the vim-web control bar to match the design system theme.
+- Use lighter, brighter colors for the "Display" color modes in the 3D view.
 
 ## Questions
 
@@ -71,6 +74,11 @@
 - [ ] Click refresh while you type a note; the note is kept after the refresh
 - [ ] The 3D view background is #0b121c (sample it with a color picker), before and after the model loads
 - [ ] The axis widget does not show in the top right of the 3D view; the "Cost Details" button sits in the top-right corner
+- [ ] Isolate a selection (or exclude elements with ghosting on); the ghosted elements show light, not black, on the dark background
+- [ ] The control bar at the bottom of the 3D view uses the dark design system colors; hover, active and disabled buttons are clear
+- [ ] Open Settings, the isolation settings (sliders button) and Help from the control bar; the panels are dark with readable text and inputs
+- [ ] Select an element, then click Help in the control bar; the Help close button in the top-right corner is not covered by "Cost Details"
+- [ ] On "MEP Estimate Sheet" in Medical Tower Project, check the header box (include all), then uncheck it again; both complete with no CORS error in the browser console and no error toast
 - [ ] Open "Medical Tower Project", select "MEP Estimate Sheet"; only MEP elements show in 3D, grouped by the six MasterFormat work packages, TOTAL about $47.1M (direct about $34.4M)
 
 ## General Notes
@@ -88,5 +96,7 @@
 - Allow edits only for the Manager and Admin project roles; Viewers see a read-only estimate
 - Add a refresh button next to the "Estimate" title that reloads the estimate data from VIM Server without losing edits in progress
 - Set the 3D viewer background to #0b121c and hide the axis widget
+- Lighten ghosted elements, and restyle the vim-web control bar, its tooltips and the panels it opens in the design system theme
+- Send at most two data-store write requests at a time, and retry safe requests when VIM Server is busy (no answer, 429 or 5xx), so bulk changes on large sheets do not fail with CORS errors
 - Restyle the app with a copy of the vim-html-ds design system (stylesheet, fonts, React components)
 - Replace the label end-to-end tests with estimate tests, and rewrite the README for the Estimate sample

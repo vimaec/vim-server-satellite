@@ -742,7 +742,8 @@ test.describe('estimate', () => {
       failWrite: (write) => {
         if (!failNext || write.kind !== 'put-batch' || write.namespace !== SHEET_1) return undefined
         failNext = false
-        return 500
+        // A refusal, not a transient error: the write path retries 5xx, so a 500 would land on the retry.
+        return 403
       },
       // The re-read's list of the sheet is held, with the entries of when it was asked for.
       holdRead: ({ namespace, key }) => {
@@ -981,6 +982,65 @@ test.describe('estimate', () => {
     // One DS step (--ds-space-2, 8 px) in from the pane's top and right edges.
     expect(Math.round(corner.y - pane.y)).toBe(8)
     expect(Math.round(pane.x + pane.width - (corner.x + corner.width))).toBe(8)
+  })
+
+  test('ghosted elements are the DS light grey at a low opacity, and an excluded element is one', async ({
+    page,
+  }) => {
+    await openEstimate(page)
+    // DS --text-200, as it reaches the screen (vim-web writes it with no sRGB step).
+    expect(await page.evaluate(() => window.__vimSatellite?.getViewerGhost())).toEqual({
+      color: '#d6dce6',
+      opacity: 0.1,
+    })
+    // vim-web's "Show Ghost" is on, so what the estimate hides in 3D is drawn as a ghost.
+    await selectElement(page, WALL)
+    await page.keyboard.press('ControlOrMeta+x')
+    await expect.poll(() => page.evaluate((index) => window.__vimSatellite?.isElementHidden(index), WALL)).toBe(true)
+    await expect(page.locator('.vim-control-bar-button[data-tip="Show All"]')).toHaveAttribute('data-on', 'true')
+  })
+
+  test('the control bar is drawn in the DS theme', async ({ page }) => {
+    await openEstimate(page)
+    const bar = page.locator('.vim-control-bar')
+    await expect(bar).toBeVisible()
+    /** A DS colour token as the browser computes it (`rgb(…)`), read in the viewer pane. */
+    const token = (name: string): Promise<string> =>
+      page.getByTestId('viewer-pane').evaluate((pane, name) => {
+        const probe = document.createElement('div')
+        probe.style.color = `var(${name})`
+        pane.append(probe)
+        const value = getComputedStyle(probe).color
+        probe.remove()
+        return value
+      }, name)
+
+    // A group: a flat DS surface with a hairline, square, no shadow (vim-web: a white pill).
+    const section = bar.locator('.vim-control-bar-section').first()
+    await expect(section).toHaveCSS('background-color', await token('--stage-800'))
+    await expect(section).toHaveCSS('border-top-color', await token('--hairline'))
+    await expect(section).toHaveCSS('border-top-width', '1px')
+    await expect(section).toHaveCSS('border-radius', '0px')
+    await expect(section).toHaveCSS('box-shadow', 'none')
+
+    // A button: the DS button radius, the DS text grey; the mode that is on (Orbit) has the cyan keyline.
+    const pan = bar.locator('.vim-control-bar-button[data-tip="Pan"]')
+    await expect(pan).toHaveCSS('border-radius', '3px')
+    await expect(pan).toHaveCSS('color', await token('--text-300'))
+    const orbit = bar.locator('.vim-control-bar-button[data-tip="Orbit"]')
+    await expect(orbit).toHaveAttribute('data-on', 'true')
+    await expect(orbit).toHaveCSS('border-top-color', await token('--vim-cyan'))
+    await expect(orbit).toHaveCSS('color', await token('--text-100'))
+
+    // Hover: the DS raised fill, no zoom.
+    await pan.hover()
+    await expect(pan).toHaveCSS('background-color', await token('--stage-600'))
+    await expect(pan).toHaveCSS('transform', 'none')
+
+    // Nothing selected: Isolate Selection is not available, and shows it.
+    const isolate = bar.locator('.vim-control-bar-button[data-tip="Isolate Selection"]')
+    await expect(isolate).toHaveAttribute('data-on', 'false')
+    await expect(isolate).toHaveCSS('opacity', '0.4')
   })
 
   test('Cost Details steps through the selection without changing it', async ({ page }) => {

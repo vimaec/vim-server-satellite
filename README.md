@@ -164,6 +164,22 @@ model loads. vim-web writes that colour to the screen without a linear-to-sRGB s
 again, and the viewer is created with `canReadLocalStorage: false`, so no setting saved by its
 settings panel applies either.
 
+Ghosted elements are a pale veil of the DS light grey `#d6dce6` (`--text-200`) at opacity 0.1
+(`GHOST_COLOR` and `GHOST_OPACITY`), not vim-web's near-black default, which vanishes on the dark
+background. They go to vim-web as the core setting `materials.ghost`, and the colour is built the
+same way as the background, because vim-web's ghost shader also writes it with no sRGB step. A ghost
+is an element vim-web draws as hidden while its "Show Ghost" setting is on (the default): the
+estimate's excluded elements (it hides them with `element.visible = false`), and what the control
+bar's Isolate Selection and Hide Selection leave out. vim-web's isolation settings panel can change
+the opacity for the session; with `canReadLocalStorage: false` the change is not kept.
+
+vim-web's control bar and the panels it opens are restyled in the DS theme by the "vim-web control
+bar" section of `src/styles.css`, scoped to `.viewer-pane`: flat `--stage` groups with a 1px
+hairline, no shadow, and buttons that follow the DS icon button (`--ds-radius-btn`, the `--text`
+greys, a cyan keyline and tint for a mode that is on, 40 % opacity when not available). The
+Settings, Render Settings and Section Box panels keep vim-web's markup; their vim-web palette
+variables are pointed at DS tokens. vim-web's own CSS in `node_modules` is not changed.
+
 ### Element identity
 
 Three different ids show up around one element, and choosing the wrong one silently breaks
@@ -271,6 +287,18 @@ the app takes that as "it exists" and writes into it.
   40 ms of each other go out as one batch (`PUT /data/{ns}` for upserts, `POST /data/{ns}/delete`
   for deletes, at most 1,000 keys per request), so an action on 5,000 elements is a handful of
   requests.
+- **Busy server.** Under load, VIM Server sometimes answers an API call with a 5xx, or with a `302` to
+  the Entra sign-in page. That redirect has no CORS headers, so the browser reports a CORS error and
+  `fetch` fails with no status. The app keeps the load low and recovers: a bulk change is split into
+  batches of 1,000 entries, and at most `WRITE_CONCURRENCY` (2) batch requests are in flight at once
+  (`mapLimit` in `src/api/limit.ts`). Requests that are safe to send again opt in with `retry: true`
+  (data-store reads, batch upserts, batch deletes, namespace deletes, and a PUT without a
+  precondition); `src/api/http.ts` retries them up to three times, after 0.5 s, 1 s and 2 s plus
+  jitter, when there is no answer or the status is 429, 500, 502, 503 or 504. A `401` is never
+  retried: it still ends the session. The conditional sheet write (`If-Match`) is never sent again
+  blindly: after a failure the sheet is read again, and written again only when its `ETag` shows the
+  first write did not land. When the retries are used up, the change is taken back and the toast says
+  "VIM Server did not answer".
 - All writes go through **one serial queue**, in the order the user made them: a new cost code
   reaches the server before the assignments that use it, a new sheet before its assignments.
 - Writes are **optimistic**: the screen changes first. When the server refuses a write, the change is
@@ -482,6 +510,7 @@ window.__vimSatellite = {
                                                 //   loads: whole reads taken in so far }
   isElementHidden(index): boolean               // excluded in the active sheet, so hidden in 3D
   getViewerBackground():  string | null         // vim-web's background colour, '#rrggbb'
+  getViewerGhost():       DebugGhost | null     // vim-web's ghost fill: { color: '#rrggbb', opacity }
 }
 ```
 
@@ -491,7 +520,7 @@ The specs:
 |---|---|
 | `auth.spec.ts` | Sign-in page, the PKCE reply and its `state` check, Entra errors, sign out, silent refresh, a refused refresh, the `/config` fallback, a `401` while signed in |
 | `projects.spec.ts` | The picker by organisation, a project without a VIM, the project page (title, snapshot, role), `?project=` across a reload, a hidden project, the loading and download-error states |
-| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Reload (changes made on the server, a deleted active sheet, a Viewer; an edit still being written, an edit made while it reads), the viewer background, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
+| `estimate.spec.ts` | The estimate end to end on the Tiny House: no writes while browsing, Set Cost Code with the virtual `sheet-1` created on the first write, seeded data and a reload, Exclude / Include, colours by cost, new / duplicate / delete sheet, the last sheet, delete a cost code in every sheet, a unit price edit, a markup read–modify–write over a concurrent edit, two users editing markups at once, the `Viewer` role and an unknown role, a sheet whose assignments cannot be read, an edit made while the estimate is re-read after a failure, a refused write rolled back, Reload (changes made on the server, a deleted active sheet, a Viewer; an edit still being written, an edit made while it reads), the viewer background, the ghost colour, the DS control bar, Cost Details, EN / 日本語, Ctrl+C / Ctrl+V, the 3D right-click menu |
 | `estimate-pricing.spec.ts` | The pure functions: pricing, totals and markups, the lump-sum and missing rules, the cost ramp, colours by level, grouping and search, the cost code tree, number parsing |
 | `estimate-quantities.spec.ts` | `readFacts()` on the fixture: metric lengths, areas and volumes, material fallbacks, names from the BIM tables |
 | `mock-server.spec.ts` | The harness itself: Range replies, data store preconditions, the bearer check |

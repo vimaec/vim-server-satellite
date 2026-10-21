@@ -37,7 +37,12 @@ export type SatelliteDebug = {
   isElementHidden: (index: number) => boolean
   /** The 3D view's background as vim-web's renderer holds it (`#rrggbb`), or null before the viewer exists. */
   getViewerBackground: () => string | null
+  /** The ghost fill as vim-web's materials hold it, or null before the viewer exists. */
+  getViewerGhost: () => DebugGhost | null
 }
+
+/** What `getViewerGhost()` returns: the colour (`#rrggbb`, as it reaches the screen) and opacity of ghosted elements. */
+export type DebugGhost = { color: string; opacity: number }
 
 /** The estimate fields the hook reads; the snapshot is built on demand, not on every change. */
 export type DebugEstimateSource = {
@@ -56,6 +61,7 @@ let selection: number[] = []
 let colors = new Map<number, string>()
 let estimate: DebugEstimateSource | null = null
 let viewerBackground: () => string | null = () => null
+let viewerGhost: () => DebugGhost | null = () => null
 
 export function setDebugState(next: string): void {
   stateName = next
@@ -76,6 +82,11 @@ export function setDebugEstimate(next: DebugEstimateSource | null): void {
 /** How to read the viewer's background; null when the viewer is gone. */
 export function setDebugViewerBackground(read: (() => string | null) | null): void {
   viewerBackground = read ?? (() => null)
+}
+
+/** How to read the viewer's ghost fill; null when the viewer is gone. */
+export function setDebugViewerGhost(read: (() => DebugGhost | null) | null): void {
+  viewerGhost = read ?? (() => null)
 }
 
 declare global {
@@ -102,5 +113,6 @@ export function installDebugHook(): void {
       },
     isElementHidden: (index) => estimate?.hidden.has(index) ?? false,
     getViewerBackground: () => viewerBackground(),
+    getViewerGhost: () => viewerGhost(),
   }
 }

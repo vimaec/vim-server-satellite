@@ -171,6 +171,159 @@ h3 {
   display: none;
 }
 
+/* === vim-web control bar, in the DS theme ==================================
+   vim-web draws its bar as white pills with shadows (node_modules/vim-web/
+   dist/style.css, "Control Bar"); these rules put it in the DS envelope: flat
+   --stage fills, 1px hairlines, square groups, --ds-radius-btn buttons, no
+   shadow, no transition. The buttons follow .ds-iconbtn (ds.css): the same
+   size, fill, active and disabled look.
+
+   vim-web's markup: .vim-control-bar holds one .vim-control-bar-section per
+   group, each holding .vim-control-bar-button elements with
+     data-on       "true" / "false"
+     data-variant  default          data-on = the mode or toggle is on
+                   expand           the same (Enable Section Box)
+                   disabled         data-on = available; "false" = disabled
+                   disabled-default the same, and "true" also shows as on
+                                    (Clear Selection, while there is one)
+   When the pane is too narrow, the groups wrap to a second row (Settings /
+   Help / Fullscreen first). Scoped to .viewer-pane, the only vim-web host. */
+
+.viewer-pane .vim-control-bar {
+  bottom: var(--ds-space-2);
+  gap: var(--ds-space-2);
+  transition: none;
+}
+
+/* One group: a common region, like a DS menu surface (square, hairline). */
+.viewer-pane .vim-control-bar-section {
+  gap: var(--ds-space-1);
+  margin-bottom: 0;
+  padding: var(--ds-space-1);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--stage-800);
+  box-shadow: none;
+}
+
+.viewer-pane .vim-control-bar-button {
+  width: var(--ds-control-h);
+  height: var(--ds-control-h);
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-btn);
+  background: transparent;
+  color: var(--text-300);
+  transition: none;
+}
+
+/* vim-web draws its icons at 20 px; the DS icon button holds a 14 px SVG
+   (.ds-iconbtn__svg). Block, so it does not sit on a text baseline. */
+.viewer-pane .vim-control-bar-button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* Hover: the .ds-iconbtn fill and text, with a hairline border (as
+   .ds-btn--ghost:hover) rather than its cyan one, so that cyan only ever
+   means "on" in a bar where a mode is always on. */
+.viewer-pane .vim-control-bar-button:hover {
+  transform: none;
+  border-color: var(--hairline-soft);
+  background: var(--stage-600);
+  color: var(--text-100);
+}
+
+/* vim-web turns its own focus ring off; keyboard users get the DS one. */
+.viewer-pane .vim-control-bar-button:focus-visible {
+  outline: 1px solid var(--vim-cyan);
+  outline-offset: 1px;
+}
+
+/* On (a mode, a toggle): .ds-iconbtn.ds-active, an opaque cyan tint. For the
+   "disabled" variant data-on only means "available", so it is not "on". */
+.viewer-pane .vim-control-bar-button:not([data-variant='disabled'])[data-on='true'] {
+  border-color: var(--vim-cyan);
+  background: color-mix(in srgb, var(--vim-cyan) var(--vim-cyan-tint-pct), var(--stage-700));
+  color: var(--text-100);
+}
+
+/* Not available now (nothing selected, nothing hidden): the DS disabled look.
+   vim-web already takes the pointer events away. */
+.viewer-pane .vim-control-bar-button[data-variant^='disabled'][data-on='false'] {
+  color: var(--text-300);
+  opacity: 0.4;
+}
+
+/* The bar's hover tips. vim-web portals them to document.body, out of
+   .viewer-pane, so this one rule is not scoped; the class is vim-web's own.
+   The DS tooltip (.ds-tip) look. `body` outranks vim-web's own rule, which
+   loads after this file. */
+body .vim-tooltip-portal {
+  padding: 5px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--stage-700);
+  color: var(--text-100);
+  font-family: var(--font-body);
+  font-size: var(--ds-fs-small);
+  line-height: 1.35;
+  box-shadow: none;
+}
+
+/* The panels the bar opens (Settings on the side; Render Settings and Section
+   Box Offsets floating over it). vim-web paints them from its own palette
+   variables, so they are re-pointed at DS tokens here, for these panels only:
+   the light greys become stage fills and hairlines, the dark greys text. */
+.viewer-pane .vim-side-panel,
+.viewer-pane .vim-panel {
+  --c-white: var(--stage-800);
+  --c-lightest-gray: var(--stage-800);
+  --c-light-gray: var(--stage-600);
+  --c-gray-divider: var(--hairline);
+  --c-medium-gray: var(--text-300);
+  --c-dark-gray-cool: var(--text-300);
+  --c-dark-gray-warm: var(--text-200);
+  --c-darker-gray: var(--text-200);
+  --c-primary: var(--vim-cyan);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  color: var(--text-200);
+}
+
+/* A floating panel over the 3D view: a hairline edge, as a DS menu surface. */
+.viewer-pane .vim-panel-overlay .vim-panel {
+  border: 1px solid var(--hairline);
+}
+
+/* vim-web leaves the text of its text boxes and selects to the browser
+   (black on white); the DS input look. */
+.viewer-pane .vim-settings-textbox {
+  border-color: var(--hairline);
+  background: var(--stage-900);
+  color: var(--text-100);
+}
+
+.viewer-pane .vim-select-trigger {
+  color: var(--text-100);
+}
+
+/* Its options as DS menu items: a cyan tint on hover, the current one cyan. */
+.viewer-pane .vim-select-option:hover {
+  background: var(--vim-cyan-tint);
+  color: var(--text-100);
+}
+
+.viewer-pane .vim-select-option[data-selected] {
+  color: var(--vim-cyan);
+}
+
+/* The "[0, 1]" range hints, in the light grey that is now a fill. */
+.viewer-pane .vim-panel-entry-info {
+  color: var(--text-400);
+}
+
 /* === Estimate =============================================================
    The workspace is [ estimate panel | 3D viewer | Cost Details ], with DS split
    handles between them. The panel's rules are estimate.html's .en-* / .ed-*
@@ -219,6 +372,12 @@ h3 {
   top: var(--ds-space-2);
   right: var(--ds-space-2);
   z-index: 30;
+}
+
+/* vim-web's modal (the control bar's Help) covers the 3D view and has its
+   close button in this same corner, so the float steps aside while it is open. */
+.en-stage:has(.vim-modal) .en-stage__float {
+  display: none;
 }
 
 .en-details {
